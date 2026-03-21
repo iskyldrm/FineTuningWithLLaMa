@@ -125,8 +125,13 @@ Onerilen pratik:
 MiniMax-M2.5 bazi Colab GPU tiplerinde VRAM sinirina takilabilir.
 Gerektiginde daha guclu runtime sec veya daha kucuk modelle devam et.
 
+## Aktif Sprint
+
+- [Sprint 1 - Mart 2026](ai-system/sprints/sprint-1-march.md)
+
 ## Repo Icerigi
 
+- [ai-system/sprints/sprint-1-march.md](ai-system/sprints/sprint-1-march.md): Sprint 1 - Mart 2026
 - [example_colab_finetune_llama.ipynb](example_colab_finetune_llama.ipynb): Veri yukleme, egitme, cikti kaydetme
 - [ai-system/roadmap/01-foundations.md](ai-system/roadmap/01-foundations.md)
 - [ai-system/roadmap/02-agents.md](ai-system/roadmap/02-agents.md)
