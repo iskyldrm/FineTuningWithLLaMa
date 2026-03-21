@@ -2,6 +2,22 @@
 
 Bu klasor, ogrenme + proje + dokumantasyon sisteminin ana merkezidir.
 
+## Wiki Index
+
+- [[roadmap/01-foundations]]
+- [[roadmap/02-agents]]
+- [[roadmap/03-finetuning]]
+- [[roadmap/04-rag]]
+- [[roadmap/05-enterprise]]
+- [[notes/ollama]]
+- [[notes/vector-db]]
+- [[notes/mcp]]
+- [[projects/telegram-agent]]
+- [[projects/n8n-ai-workflows]]
+- [[projects/enterprise-ai]]
+- [[resources/links]]
+- [[resources/note-template]]
+
 ## Klasor Haritasi
 
 - [roadmap/01-foundations.md](roadmap/01-foundations.md)

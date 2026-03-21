@@ -1,5 +1,14 @@
 # 02 Agents
 
+## Related Nodes
+- [[../README]]
+- [[01-foundations]]
+- [[04-rag]]
+- [[05-enterprise]]
+- [[../notes/mcp]]
+- [[../projects/telegram-agent]]
+- [[../projects/n8n-ai-workflows]]
+
 ## Hedef
 Gorev odakli agent mimarisi kurmak.
 

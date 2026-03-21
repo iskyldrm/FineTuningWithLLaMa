@@ -1,5 +1,12 @@
 # Ollama Notes
 
+## Related Nodes
+- [[../README]]
+- [[../roadmap/01-foundations]]
+- [[../roadmap/03-finetuning]]
+- [[../projects/telegram-agent]]
+- [[../resources/links]]
+
 ## Nedir?
 Local ortamda model calistirma araci.
 

@@ -1,5 +1,13 @@
 # n8n AI Workflows Project
 
+## Related Nodes
+- [[../README]]
+- [[../roadmap/02-agents]]
+- [[../roadmap/04-rag]]
+- [[../notes/vector-db]]
+- [[telegram-agent]]
+- [[enterprise-ai]]
+
 ## Amac
 n8n benzeri AI is akislari tasarlamak.
 

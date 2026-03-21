@@ -1,5 +1,12 @@
 # Vector DB Notes
 
+## Related Nodes
+- [[../README]]
+- [[../roadmap/04-rag]]
+- [[../projects/n8n-ai-workflows]]
+- [[../projects/enterprise-ai]]
+- [[../resources/links]]
+
 ## Nedir?
 Embedding vektorlerini saklayip benzerlik sorgusu yapan veritabani.
 

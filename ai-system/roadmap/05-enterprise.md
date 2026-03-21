@@ -1,5 +1,13 @@
 # 05 Enterprise
 
+## Related Nodes
+- [[../README]]
+- [[02-agents]]
+- [[04-rag]]
+- [[../notes/mcp]]
+- [[../projects/enterprise-ai]]
+- [[../resources/links]]
+
 ## Hedef
 Kurumsal gereksinimlere uygun agent sistemi.
 

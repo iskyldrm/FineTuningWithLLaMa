@@ -1,5 +1,12 @@
 # MCP Notes
 
+## Related Nodes
+- [[../README]]
+- [[../roadmap/02-agents]]
+- [[../roadmap/05-enterprise]]
+- [[../projects/enterprise-ai]]
+- [[../resources/links]]
+
 ## Nedir?
 Model Context Protocol, model ile araclar arasinda standart bir baglanti katmani saglar.
 
