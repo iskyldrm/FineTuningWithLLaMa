@@ -1,7 +1,7 @@
 # MCP Notes
 
 ## Related Nodes
-- [[README]]
+- [[APEX]]
 - [[../roadmap/02-agents]]
 - [[../roadmap/05-enterprise]]
 - [[../projects/enterprise-ai]]
@@ -23,4 +23,5 @@ Agentlerin farkli kaynaklara guvenli ve kontrollu sekilde erismesini kolaylastir
 
 ## Kaynaklar
 - https://modelcontextprotocol.io
+
 

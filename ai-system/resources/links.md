@@ -1,7 +1,7 @@
 # Useful Links
 
 ## Related Nodes
-- [[README]]
+- [[APEX]]
 - [[../roadmap/03-finetuning]]
 - [[../roadmap/04-rag]]
 - [[../roadmap/05-enterprise]]
@@ -21,4 +21,5 @@
 
 ## Automation
 - https://n8n.io
+
 

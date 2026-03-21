@@ -1,7 +1,7 @@
 # 05 Enterprise
 
 ## Related Nodes
-- [[README]]
+- [[APEX]]
 - [[02-agents]]
 - [[04-rag]]
 - [[../notes/mcp]]
@@ -20,4 +20,5 @@ Kurumsal gereksinimlere uygun agent sistemi.
 - [ ] Baslanmadi
 - [ ] Devam ediyor
 - [ ] Tamamlandi
+
 

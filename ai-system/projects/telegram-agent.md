@@ -1,7 +1,7 @@
 # Telegram Agent Project
 
 ## Related Nodes
-- [[README]]
+- [[APEX]]
 - [[../roadmap/02-agents]]
 - [[../notes/ollama]]
 - [[n8n-ai-workflows]]
@@ -19,4 +19,5 @@ Telegram uzerinden komut alabilen ve AI destekli cevap uretebilen bir agent.
 - [ ] Fikir
 - [ ] PoC
 - [ ] Uretim
+
 

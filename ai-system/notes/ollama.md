@@ -1,7 +1,7 @@
 # Ollama Notes
 
 ## Related Nodes
-- [[README]]
+- [[APEX]]
 - [[../roadmap/01-foundations]]
 - [[../roadmap/03-finetuning]]
 - [[../projects/telegram-agent]]
@@ -23,4 +23,5 @@ Offline test, hizli prototipleme ve gizlilik icin faydali.
 
 ## Kaynaklar
 - https://ollama.com
+
 

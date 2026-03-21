@@ -1,7 +1,7 @@
 # 01 Foundations
 
 ## Related Nodes
-- [[README]]
+- [[APEX]]
 - [[02-agents]]
 - [[03-finetuning]]
 - [[04-rag]]
@@ -21,4 +21,5 @@ Temel AI altyapisini kavramak: model turleri, veri akisi, deployment temelleri.
 - [ ] Baslanmadi
 - [ ] Devam ediyor
 - [ ] Tamamlandi
+
 

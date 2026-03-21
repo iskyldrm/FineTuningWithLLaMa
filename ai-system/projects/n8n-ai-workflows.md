@@ -1,7 +1,7 @@
 # n8n AI Workflows Project
 
 ## Related Nodes
-- [[README]]
+- [[APEX]]
 - [[../roadmap/02-agents]]
 - [[../roadmap/04-rag]]
 - [[../notes/vector-db]]
@@ -20,4 +20,5 @@ n8n benzeri AI is akislari tasarlamak.
 - [ ] Fikir
 - [ ] PoC
 - [ ] Uretim
+
 

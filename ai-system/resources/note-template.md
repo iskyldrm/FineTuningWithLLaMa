@@ -1,7 +1,7 @@
 # Baslik
 
 ## Related Nodes
-- [[README]]
+- [[APEX]]
 - [[links]]
 - [[../roadmap/01-foundations]]
 - [[../roadmap/02-agents]]
@@ -24,4 +24,5 @@ Kisa aciklama
 
 ## Kaynaklar
 - link
+
 
