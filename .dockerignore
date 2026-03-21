@@ -1,4 +1,4 @@
-bin/
+﻿bin/
 obj/
 .nuget/
 .dotnet-home/
@@ -10,3 +10,4 @@ tests/**/bin/
 tests/**/obj/
 src/**/bin/
 src/**/obj/
+src/Apex.AgentTeam.Api/appsettings.Development.json

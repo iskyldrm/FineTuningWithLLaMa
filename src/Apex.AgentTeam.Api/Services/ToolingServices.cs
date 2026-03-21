@@ -259,12 +259,14 @@ public sealed class GitHubCatalogService : IGitHubCatalog
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly GitHubOptions _options;
     private readonly ILogger<GitHubCatalogService> _logger;
+    private readonly TimeProvider _timeProvider;
 
-    public GitHubCatalogService(IHttpClientFactory httpClientFactory, IOptions<GitHubOptions> options, ILogger<GitHubCatalogService> logger)
+    public GitHubCatalogService(IHttpClientFactory httpClientFactory, IOptions<GitHubOptions> options, ILogger<GitHubCatalogService> logger, TimeProvider timeProvider)
     {
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
         _logger = logger;
+        _timeProvider = timeProvider;
     }
 
     public async Task<IReadOnlyList<RepositoryRef>> ListRepositoriesAsync(CancellationToken cancellationToken)
@@ -344,35 +346,104 @@ public sealed class GitHubCatalogService : IGitHubCatalog
             var response = await client.GetAsync($"/repos/{owner}/{repository}/milestones?state=all&per_page=100", cancellationToken);
             response.EnsureSuccessStatusCode();
 
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            var sprints = await ReadMilestonesAsync(response, cancellationToken);
+            if (sprints.Count > 0)
             {
-                return [];
+                return sprints;
             }
 
-            var sprints = new List<SprintRef>();
-            foreach (var item in document.RootElement.EnumerateArray())
-            {
-                DateTimeOffset? dueOn = item.TryGetProperty("due_on", out var dueOnElement) && dueOnElement.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(dueOnElement.GetString(), out var parsedDueOn) ? parsedDueOn : null;
-
-                sprints.Add(new SprintRef
-                {
-                    Id = item.TryGetProperty("id", out var idElement) && idElement.TryGetInt64(out var id) ? id : 0,
-                    Title = item.TryGetProperty("title", out var titleElement) ? titleElement.GetString() ?? string.Empty : string.Empty,
-                    Number = item.TryGetProperty("number", out var numberElement) && numberElement.TryGetInt32(out var number) ? number : 0,
-                    State = item.TryGetProperty("state", out var stateElement) ? stateElement.GetString() ?? string.Empty : string.Empty,
-                    DueOn = dueOn
-                });
-            }
-
-            return sprints;
+            return await EnsureDefaultMilestonesAsync(owner, repository, cancellationToken);
         }
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "Unable to list GitHub milestones for {Owner}/{Repository}.", owner, repository);
             return [];
         }
+    }
+
+    public async Task<IReadOnlyList<SprintRef>> EnsureDefaultMilestonesAsync(string owner, string repository, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repository) || string.IsNullOrWhiteSpace(_options.AccessToken))
+        {
+            return [];
+        }
+
+        try
+        {
+            var client = CreateClient();
+            var existingResponse = await client.GetAsync($"/repos/{owner}/{repository}/milestones?state=all&per_page=100", cancellationToken);
+            existingResponse.EnsureSuccessStatusCode();
+            var existingMilestones = await ReadMilestonesAsync(existingResponse, cancellationToken);
+            if (existingMilestones.Count > 0)
+            {
+                return existingMilestones;
+            }
+
+            var blueprints = BuildDefaultMilestones();
+            foreach (var blueprint in blueprints)
+            {
+                var createResponse = await client.PostAsJsonAsync($"/repos/{owner}/{repository}/milestones", new
+                {
+                    title = blueprint.Title,
+                    description = blueprint.Description,
+                    state = "open",
+                    due_on = blueprint.DueOn?.UtcDateTime.ToString("O")
+                }, cancellationToken);
+
+                if (!createResponse.IsSuccessStatusCode)
+                {
+                    var body = await createResponse.Content.ReadAsStringAsync(cancellationToken);
+                    _logger.LogWarning("GitHub default milestone creation failed for {Owner}/{Repository}: {StatusCode} {Body}", owner, repository, createResponse.StatusCode, body);
+                }
+            }
+
+            var refreshResponse = await client.GetAsync($"/repos/{owner}/{repository}/milestones?state=all&per_page=100", cancellationToken);
+            refreshResponse.EnsureSuccessStatusCode();
+            return await ReadMilestonesAsync(refreshResponse, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Unable to create default milestones for {Owner}/{Repository}.", owner, repository);
+            return [];
+        }
+    }
+
+    private async Task<List<SprintRef>> ReadMilestonesAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var sprints = new List<SprintRef>();
+        foreach (var item in document.RootElement.EnumerateArray())
+        {
+            DateTimeOffset? dueOn = item.TryGetProperty("due_on", out var dueOnElement) && dueOnElement.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(dueOnElement.GetString(), out var parsedDueOn) ? parsedDueOn : null;
+
+            sprints.Add(new SprintRef
+            {
+                Id = item.TryGetProperty("id", out var idElement) && idElement.TryGetInt64(out var id) ? id : 0,
+                Title = item.TryGetProperty("title", out var titleElement) ? titleElement.GetString() ?? string.Empty : string.Empty,
+                Number = item.TryGetProperty("number", out var numberElement) && numberElement.TryGetInt32(out var number) ? number : 0,
+                State = item.TryGetProperty("state", out var stateElement) ? stateElement.GetString() ?? string.Empty : string.Empty,
+                DueOn = dueOn
+            });
+        }
+
+        return sprints;
+    }
+
+    private List<(string Title, string Description, DateTimeOffset? DueOn)> BuildDefaultMilestones()
+    {
+        var now = _timeProvider.GetUtcNow();
+        return
+        [
+            ($"Sprint 1 - Foundation", "Repository setup, architecture pass, and baseline backlog.", now.AddDays(14)),
+            ($"Sprint 2 - Build", "Core implementation, API/UI integration, and validation.", now.AddDays(28)),
+            ($"Sprint 3 - Polish", "Stability, QA, rollout prep, and support handoff.", now.AddDays(42))
+        ];
     }
 
     private HttpClient CreateClient()
@@ -616,4 +687,5 @@ public sealed class UnifiedDiffPatchPolicy : IPatchPolicy
         return new PatchPolicyDecision(true, "Patch accepted by sandbox policy.");
     }
 }
+
 

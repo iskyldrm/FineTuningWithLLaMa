@@ -1,8 +1,9 @@
-﻿export type AgentRole = 'Manager' | 'Analyst' | 'WebDev' | 'Frontend' | 'Backend' | 'Tester' | 'PM' | 'Support'
+export type AgentRole = 'Manager' | 'Analyst' | 'WebDev' | 'Frontend' | 'Backend' | 'Tester' | 'PM' | 'Support'
 export type AgentRunStatus = 'Idle' | 'Thinking' | 'Delegating' | 'Coding' | 'Reviewing' | 'Waiting' | 'Completed' | 'Error'
 export type MissionStatus = 'Draft' | 'Queued' | 'Running' | 'AwaitingPatchApproval' | 'Completed' | 'Failed'
 export type MissionStepStatus = 'Pending' | 'InProgress' | 'Completed' | 'Blocked'
 export type PatchProposalStatus = 'PendingReview' | 'Approved' | 'Rejected' | 'Applied' | 'Failed'
+export type AppRoute = 'dashboard' | 'agents' | 'workflows' | 'execution'
 
 export interface RepositoryRef {
   owner: string
@@ -150,4 +151,49 @@ export interface CreateMissionRequest {
   prompt: string
   selectedRepository?: RepositoryRef | null
   selectedSprint?: SprintRef | null
+}
+
+export interface DashboardMetric {
+  label: string
+  value: string
+  helper: string
+  tone: 'cyan' | 'lime' | 'violet' | 'rose'
+}
+
+export interface AgentPodGroup {
+  id: string
+  label: string
+  description: string
+  roles: AgentRole[]
+  count: number
+  tone: 'cyan' | 'lime' | 'violet' | 'rose'
+}
+
+export interface WorkflowNode {
+  id: string
+  x: number
+  y: number
+  width: number
+  owner: AgentRole
+  title: string
+  summary: string
+  status: MissionStepStatus
+  tone: 'cyan' | 'lime' | 'violet' | 'rose'
+}
+
+export interface WorkflowEdge {
+  id: string
+  from: string
+  to: string
+  active: boolean
+  label: string
+}
+
+export interface ExecutionFeedRow {
+  id: string
+  line: number
+  createdAt: string
+  tag: string
+  tone: 'cyan' | 'lime' | 'violet' | 'rose' | 'neutral'
+  content: string
 }

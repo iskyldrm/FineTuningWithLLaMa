@@ -25,10 +25,6 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function getApiBase() {
-  return API_BASE
-}
-
 export function createRealtimeConnection(handlers: { onActivity: (event: ActivityEvent) => void; onProgress: (event: ProgressLog) => void }) {
   const connection = new signalR.HubConnectionBuilder()
     .withUrl(`${API_BASE}/hubs/activity`)
@@ -50,6 +46,12 @@ export function fetchRepositories() {
 
 export function fetchMilestones(owner: string, repo: string) {
   return requestJson<SprintRef[]>(`/api/github/repositories/${owner}/${repo}/milestones`)
+}
+
+export function ensureDefaultMilestones(owner: string, repo: string) {
+  return requestJson<SprintRef[]>(`/api/github/repositories/${owner}/${repo}/milestones/defaults`, {
+    method: 'POST',
+  })
 }
 
 export function createMission(request: CreateMissionRequest) {

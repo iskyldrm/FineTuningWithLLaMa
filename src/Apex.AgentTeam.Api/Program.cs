@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using Apex.AgentTeam.Api.Hubs;
 using Apex.AgentTeam.Api.Infrastructure;
@@ -75,6 +75,9 @@ app.MapGet("/api/github/repositories", async (IGitHubCatalog catalog, Cancellati
 
 app.MapGet("/api/github/repositories/{owner}/{repo}/milestones", async (string owner, string repo, IGitHubCatalog catalog, CancellationToken cancellationToken) =>
     Results.Ok(await catalog.ListMilestonesAsync(owner, repo, cancellationToken)));
+
+app.MapPost("/api/github/repositories/{owner}/{repo}/milestones/defaults", async (string owner, string repo, IGitHubCatalog catalog, CancellationToken cancellationToken) =>
+    Results.Ok(await catalog.EnsureDefaultMilestonesAsync(owner, repo, cancellationToken)));
 
 app.MapGet("/api/ollama/models", async (IModelGateway modelGateway, CancellationToken cancellationToken) =>
     Results.Ok(await modelGateway.ListModelsAsync(cancellationToken)));
@@ -204,5 +207,3 @@ app.MapPost("/api/chat/threads/{threadId:guid}/messages", async (Guid threadId, 
 app.MapHub<ActivityHub>("/hubs/activity");
 
 app.Run();
-
-

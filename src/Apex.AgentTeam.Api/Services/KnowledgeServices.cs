@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -210,10 +210,20 @@ public sealed class QdrantMemoryStore : IMemoryStore
         var getResponse = await client.GetAsync($"/collections/{_storageOptions.QdrantCollectionName}", cancellationToken);
         if (getResponse.IsSuccessStatusCode)
         {
-            return;
-        }
+            var currentVectorSize = await TryReadVectorSizeAsync(getResponse, cancellationToken);
+            if (currentVectorSize is null || currentVectorSize == vectorSize)
+            {
+                return;
+            }
 
-        if (getResponse.StatusCode != HttpStatusCode.NotFound)
+            _logger.LogInformation("Recreating Qdrant collection {Collection} because vector size changed from {Current} to {Expected}.", _storageOptions.QdrantCollectionName, currentVectorSize, vectorSize);
+            var deleteResponse = await client.DeleteAsync($"/collections/{_storageOptions.QdrantCollectionName}", cancellationToken);
+            if (!deleteResponse.IsSuccessStatusCode && deleteResponse.StatusCode != HttpStatusCode.NotFound)
+            {
+                deleteResponse.EnsureSuccessStatusCode();
+            }
+        }
+        else if (getResponse.StatusCode != HttpStatusCode.NotFound)
         {
             getResponse.EnsureSuccessStatusCode();
         }
@@ -234,6 +244,37 @@ public sealed class QdrantMemoryStore : IMemoryStore
         }
 
         createResponse.EnsureSuccessStatusCode();
+    }
+
+    private static async Task<int?> TryReadVectorSizeAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (!document.RootElement.TryGetProperty("result", out var resultElement)
+            || !resultElement.TryGetProperty("config", out var configElement)
+            || !configElement.TryGetProperty("params", out var paramsElement)
+            || !paramsElement.TryGetProperty("vectors", out var vectorsElement))
+        {
+            return null;
+        }
+
+        if (vectorsElement.ValueKind == JsonValueKind.Object && vectorsElement.TryGetProperty("size", out var sizeElement) && sizeElement.TryGetInt32(out var directSize))
+        {
+            return directSize;
+        }
+
+        if (vectorsElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in vectorsElement.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.Object && property.Value.TryGetProperty("size", out var namedSizeElement) && namedSizeElement.TryGetInt32(out var namedSize))
+                {
+                    return namedSize;
+                }
+            }
+        }
+
+        return null;
     }
 }
 
@@ -340,3 +381,4 @@ internal static class MarkdownKnowledgeCrawler
         }
     }
 }
+

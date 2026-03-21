@@ -56,11 +56,9 @@
       Workspace__RootPath: /workspace
       Workspace__KnowledgeEntryPoint: APEX.md
       Workspace__ValidationCommand: dotnet test /workspace/tests/Apex.AgentTeam.Tests/Apex.AgentTeam.Tests.csproj -v minimal
-      GitHub__RepositoryOwner: ${GITHUB_OWNER:-}
-      GitHub__RepositoryName: ${GITHUB_REPO:-}
-      GitHub__AccessToken: ${GITHUB_TOKEN:-}
     volumes:
       - .:/workspace
+      - ./src/Apex.AgentTeam.Api/appsettings.Development.json:/app/appsettings.Development.json:ro
     ports:
       - "5000:8080"
 
@@ -79,4 +77,3 @@ volumes:
   postgres-data:
   qdrant-data:
   mongo-data:
-

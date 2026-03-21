@@ -75,6 +75,8 @@ public interface IGitHubCatalog
     Task<IReadOnlyList<RepositoryRef>> ListRepositoriesAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<SprintRef>> ListMilestonesAsync(string owner, string repository, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<SprintRef>> EnsureDefaultMilestonesAsync(string owner, string repository, CancellationToken cancellationToken);
 }
 
 public interface IMissionRepository
@@ -149,3 +151,4 @@ public sealed record PatchPolicyDecision(bool IsAllowed, string Reason);
 public sealed record PatchApplyResult(bool Success, string StdOut, string StdErr);
 
 public sealed record TestRunResult(bool Success, string Output);
+
