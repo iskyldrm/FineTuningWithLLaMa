@@ -1,0 +1,10 @@
+﻿node_modules/
+frontend/node_modules/
+.nuget/
+.dotnet-home/
+**/bin/
+**/obj/
+.vscode/
+agent-output-*.md
+frontend/dist/
+src/Apex.AgentTeam.Api/appsettings.Development.json

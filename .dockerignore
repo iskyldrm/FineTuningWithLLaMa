@@ -1,0 +1,12 @@
+bin/
+obj/
+.nuget/
+.dotnet-home/
+.git/
+.vscode/
+frontend/node_modules/
+frontend/dist/
+tests/**/bin/
+tests/**/obj/
+src/**/bin/
+src/**/obj/

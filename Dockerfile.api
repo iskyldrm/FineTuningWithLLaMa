@@ -1,0 +1,20 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+COPY Apex.AgentTeam.sln ./
+COPY src/Apex.AgentTeam.Api/Apex.AgentTeam.Api.csproj src/Apex.AgentTeam.Api/
+COPY tests/Apex.AgentTeam.Tests/Apex.AgentTeam.Tests.csproj tests/Apex.AgentTeam.Tests/
+RUN dotnet restore Apex.AgentTeam.sln
+
+COPY . .
+RUN dotnet publish src/Apex.AgentTeam.Api/Apex.AgentTeam.Api.csproj -c Release -o /app/publish --no-restore
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS runtime
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/publish ./
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "Apex.AgentTeam.Api.dll"]

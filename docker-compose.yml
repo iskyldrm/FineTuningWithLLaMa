@@ -1,0 +1,82 @@
+﻿services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: apex-agent-team-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: apex_agent_team
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    container_name: apex-agent-team-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+  mongo:
+    image: mongo:7
+    container_name: apex-agent-team-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: apex-agent-team-api
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - qdrant
+      - mongo
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      Storage__PostgresConnectionString: Host=postgres;Port=5432;Database=apex_agent_team;Username=postgres;Password=postgres
+      Storage__QdrantBaseUrl: http://qdrant:6333
+      Mongo__ConnectionString: mongodb://mongo:27017
+      Mongo__DatabaseName: apex_agent_team
+      Model__BaseUrl: http://host.docker.internal:11434
+      Model__ChatModel: ${OLLAMA_CHAT_MODEL:-qwen2.5-coder:14b}
+      Model__EmbeddingModel: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      Workspace__RootPath: /workspace
+      Workspace__KnowledgeEntryPoint: APEX.md
+      Workspace__ValidationCommand: dotnet test /workspace/tests/Apex.AgentTeam.Tests/Apex.AgentTeam.Tests.csproj -v minimal
+      GitHub__RepositoryOwner: ${GITHUB_OWNER:-}
+      GitHub__RepositoryName: ${GITHUB_REPO:-}
+      GitHub__AccessToken: ${GITHUB_TOKEN:-}
+    volumes:
+      - .:/workspace
+    ports:
+      - "5000:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: apex-agent-team-frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  postgres-data:
+  qdrant-data:
+  mongo-data:
+
