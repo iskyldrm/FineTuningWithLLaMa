@@ -1,4 +1,4 @@
-import type {
+ï»¿import type {
   ActivityEvent,
   AgentPodGroup,
   AgentRole,
@@ -304,81 +304,26 @@ export function buildExecutionFeed(snapshot: DashboardSnapshot, progressLogs: Pr
 
 export function buildFallbackDashboard(): DashboardSnapshot {
   const now = new Date().toISOString()
-  const repository: RepositoryRef = { owner: 'local', name: 'apex', fullName: 'local/apex', defaultBranch: 'main' }
-  const sprint: SprintRef = { id: 12, title: 'Neural Workspace', number: 12, state: 'open', dueOn: null }
   const agents: AgentSnapshot[] = [
-    { role: 'Manager', status: 'Delegating', label: 'Manager', detail: 'Sprint slice dagitiliyor', updatedAt: now, queueDepth: 2 },
-    { role: 'Analyst', status: 'Thinking', label: 'Analyst', detail: 'Acceptance criteria cikariliyor', updatedAt: now, queueDepth: 1 },
-    { role: 'WebDev', status: 'Thinking', label: 'WebDev', detail: 'Contract map guncelleniyor', updatedAt: now, queueDepth: 2 },
-    { role: 'Frontend', status: 'Coding', label: 'Frontend', detail: 'Control room panelleri yenileniyor', updatedAt: now, queueDepth: 3 },
-    { role: 'Backend', status: 'Coding', label: 'Backend', detail: 'Mission ve GitHub akisi acik', updatedAt: now, queueDepth: 2 },
-    { role: 'Tester', status: 'Waiting', label: 'Tester', detail: 'Patch onayi bekleniyor', updatedAt: now, queueDepth: 1 },
-    { role: 'PM', status: 'Thinking', label: 'PM', detail: 'Sprint ozeti toplanıyor', updatedAt: now, queueDepth: 1 },
-    { role: 'Support', status: 'Waiting', label: 'Support', detail: 'Operator brief hazir', updatedAt: now, queueDepth: 0 },
+    { role: 'Manager', status: 'Idle', label: 'Manager', detail: 'Task secimi bekleniyor', updatedAt: now, queueDepth: 0 },
+    { role: 'Analyst', status: 'Idle', label: 'Analyst', detail: 'Task secimi bekleniyor', updatedAt: now, queueDepth: 0 },
+    { role: 'WebDev', status: 'Idle', label: 'WebDev', detail: 'Task secimi bekleniyor', updatedAt: now, queueDepth: 0 },
+    { role: 'Frontend', status: 'Idle', label: 'Frontend', detail: 'Task secimi bekleniyor', updatedAt: now, queueDepth: 0 },
+    { role: 'Backend', status: 'Idle', label: 'Backend', detail: 'Task secimi bekleniyor', updatedAt: now, queueDepth: 0 },
+    { role: 'Tester', status: 'Idle', label: 'Tester', detail: 'Task secimi bekleniyor', updatedAt: now, queueDepth: 0 },
+    { role: 'PM', status: 'Idle', label: 'PM', detail: 'Task secimi bekleniyor', updatedAt: now, queueDepth: 0 },
+    { role: 'Support', status: 'Idle', label: 'Support', detail: 'Task secimi bekleniyor', updatedAt: now, queueDepth: 0 },
   ]
 
   return {
-    activeMission: {
-      id: 'fallback-mission',
-      title: 'Sprint #12 - Neural Workspace',
-      prompt: 'APEX knowledge base icin .NET multi-agent control room olustur.',
-      status: 'Running',
-      createdAt: now,
-      updatedAt: now,
-      currentPhase: 'Delegation in progress',
-      selectedRepository: repository,
-      selectedSprint: sprint,
-      externalTask: { provider: 'github', externalId: 'draft', title: 'Analyst backlog handoff', status: 'Draft', url: null },
-      steps: [
-        { id: '1', title: 'Sprint context load', owner: 'Manager', status: 'Completed', order: 1, summary: 'Operator brief alindi ve hedefler yerlestirildi.', dependencies: [] },
-        { id: '2', title: 'Architecture pass', owner: 'WebDev', status: 'Completed', order: 2, summary: 'API ve UI sozlesmeleri hizalandi.', dependencies: ['1'] },
-        { id: '3', title: 'UI orchestration shell', owner: 'Frontend', status: 'InProgress', order: 3, summary: 'Yeni panel sistemi referans ekranlara gore kuruluyor.', dependencies: ['2'] },
-        { id: '4', title: 'Runtime endpoints', owner: 'Backend', status: 'InProgress', order: 4, summary: 'Dashboard, milestone ve chat yuzleri yayinda.', dependencies: ['2'] },
-        { id: '5', title: 'Regression sweep', owner: 'Tester', status: 'Pending', order: 5, summary: 'Son patch review sonrasinda dogrulama baslayacak.', dependencies: ['3', '4'] },
-      ],
-      patchProposals: [
-        {
-          id: 'patch-a',
-          missionId: 'fallback-mission',
-          authorRole: 'Frontend',
-          title: 'UI V3 redesign',
-          summary: 'Dashboard, agents, workflows ve execution shell yeni visual system ile yenilendi.',
-          status: 'PendingReview',
-          targetPaths: ['frontend/src/App.tsx', 'frontend/src/styles.css'],
-          diff: 'diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx',
-          createdAt: now,
-          updatedAt: null,
-        },
-      ],
-      agents,
-      artifacts: { Manager: 'Mission sliced', WebDev: 'Contracts synced' },
-    },
+    activeMission: null,
     agents,
     recentActivities: [
-      { id: 'evt-1', missionId: 'fallback-mission', createdAt: now, eventType: 'MissionCreated', agentRole: null, summary: 'Mission dispatch edildi.', details: 'Yeni UI kabugu icin operator brief sisteme yazildi.' },
-      { id: 'evt-2', missionId: 'fallback-mission', createdAt: now, eventType: 'AgentOutput', agentRole: 'Manager', summary: 'Gorev parcasi tamamlandi.', details: 'UI, workflow, execution ve validation paketleri ayrildi.' },
-      { id: 'evt-3', missionId: 'fallback-mission', createdAt: now, eventType: 'PatchProposed', agentRole: 'Frontend', summary: 'Visual patch hazir.', details: 'Neural substrate referanslariyla ayni dil yakalandi.' },
+      { id: 'evt-idle', missionId: 'idle-mission', createdAt: now, eventType: 'QueueStatusChanged', agentRole: 'Manager', summary: 'Sistem hazir.', details: 'Repo sec, sprint sec ve istedigin taski manager agentina gonder.' },
     ],
-    recentProgressLogs: [
-      { id: 'pr-1', missionId: 'fallback-mission', role: 'Manager', stage: 'delegation', message: 'Manager delegated work to WebDev.', metadata: { fromRole: 'Manager', toRole: 'WebDev' }, createdAt: now },
-      { id: 'pr-2', missionId: 'fallback-mission', role: 'WebDev', stage: 'delegation', message: 'WebDev delegated work to Frontend.', metadata: { fromRole: 'WebDev', toRole: 'Frontend' }, createdAt: now },
-      { id: 'pr-3', missionId: 'fallback-mission', role: 'WebDev', stage: 'delegation', message: 'WebDev delegated work to Backend.', metadata: { fromRole: 'WebDev', toRole: 'Backend' }, createdAt: now },
-    ],
-    pendingPatchProposals: [
-      {
-        id: 'patch-a',
-        missionId: 'fallback-mission',
-        authorRole: 'Frontend',
-        title: 'UI V3 redesign',
-        summary: 'Dashboard, agents, workflows ve execution shell yeni visual system ile yenilendi.',
-        status: 'PendingReview',
-        targetPaths: ['frontend/src/App.tsx', 'frontend/src/styles.css'],
-        diff: 'diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx',
-        createdAt: now,
-        updatedAt: null,
-      },
-    ],
-    logicalQueueDepth: 2,
+    recentProgressLogs: [],
+    pendingPatchProposals: [],
+    logicalQueueDepth: 0,
     chatModel: 'qwen2.5-coder:14b',
     physicalWorkerCount: 1,
   }
@@ -404,6 +349,7 @@ export function stepProgressValue(step: MissionStep, index: number, total: numbe
 export function activitySummary(items: ActivityEvent[]) {
   return items.length > 0 ? items[items.length - 1].summary : 'Canli event bekleniyor'
 }
+
 
 
 

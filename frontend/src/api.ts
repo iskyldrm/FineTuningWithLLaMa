@@ -6,11 +6,11 @@ import type {
   ChatThread,
   CreateMissionRequest,
   DashboardSnapshot,
+  GitHubBoardSnapshot,
   OllamaModelInfo,
   PatchProposal,
   ProgressLog,
   RepositoryRef,
-  SprintRef,
 } from './types'
 
 const configuredBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '')
@@ -44,14 +44,8 @@ export function fetchRepositories() {
   return requestJson<RepositoryRef[]>('/api/github/repositories')
 }
 
-export function fetchMilestones(owner: string, repo: string) {
-  return requestJson<SprintRef[]>(`/api/github/repositories/${owner}/${repo}/milestones`)
-}
-
-export function ensureDefaultMilestones(owner: string, repo: string) {
-  return requestJson<SprintRef[]>(`/api/github/repositories/${owner}/${repo}/milestones/defaults`, {
-    method: 'POST',
-  })
+export function fetchRepositoryBoard(owner: string, repo: string) {
+  return requestJson<GitHubBoardSnapshot>(`/api/github/repositories/${owner}/${repo}/board`)
 }
 
 export function createMission(request: CreateMissionRequest) {

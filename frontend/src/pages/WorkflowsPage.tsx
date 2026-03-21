@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+﻿import { motion } from 'framer-motion'
 import type { ApexConsoleState } from '../app/useApexConsole'
 import { buildWorkflowGraph, roleMeta } from '../app/view-models'
 
@@ -143,3 +143,4 @@ export function WorkflowsPage({ state }: { state: ApexConsoleState }) {
     </div>
   )
 }
+

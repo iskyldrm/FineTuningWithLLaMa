@@ -79,6 +79,9 @@ app.MapGet("/api/github/repositories/{owner}/{repo}/milestones", async (string o
 app.MapPost("/api/github/repositories/{owner}/{repo}/milestones/defaults", async (string owner, string repo, IGitHubCatalog catalog, CancellationToken cancellationToken) =>
     Results.Ok(await catalog.EnsureDefaultMilestonesAsync(owner, repo, cancellationToken)));
 
+app.MapGet("/api/github/repositories/{owner}/{repo}/board", async (string owner, string repo, IGitHubCatalog catalog, CancellationToken cancellationToken) =>
+    Results.Ok(await catalog.GetRepositoryBoardAsync(owner, repo, cancellationToken)));
+
 app.MapGet("/api/ollama/models", async (IModelGateway modelGateway, CancellationToken cancellationToken) =>
     Results.Ok(await modelGateway.ListModelsAsync(cancellationToken)));
 

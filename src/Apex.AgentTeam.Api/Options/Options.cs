@@ -41,9 +41,13 @@ public sealed class WorkspaceOptions
 
     public string RootPath { get; set; } = "..\\..\\..\\..";
 
+    public string RepositoriesRootPath { get; set; } = "..\\..\\..\\..\\project-workspaces";
+
     public string KnowledgeEntryPoint { get; set; } = "APEX.md";
 
     public string ValidationCommand { get; set; } = "dotnet test Apex.AgentTeam.sln";
+
+    public string RepositoryValidationCommand { get; set; } = "git diff --check";
 }
 
 public sealed class GitHubOptions
@@ -51,6 +55,10 @@ public sealed class GitHubOptions
     public const string SectionName = "GitHub";
 
     public string BaseUrl { get; set; } = "https://api.github.com";
+
+    public string GraphQlUrl { get; set; } = "https://api.github.com/graphql";
+
+    public string WebUrl { get; set; } = "https://github.com";
 
     public string RepositoryOwner { get; set; } = string.Empty;
 

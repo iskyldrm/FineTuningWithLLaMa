@@ -13,11 +13,71 @@ export interface RepositoryRef {
 }
 
 export interface SprintRef {
-  id: number
+  id: string
   title: string
   number: number
   state: string
   dueOn?: string | null
+  iterationId?: string | null
+  projectId?: string | null
+  projectNumber?: number | null
+  projectTitle?: string | null
+  startDate?: string | null
+  durationDays?: number | null
+}
+
+export interface GitHubProjectRef {
+  id: string
+  number: number
+  title: string
+  url: string
+  ownerLogin: string
+  ownerType: string
+  shortDescription?: string | null
+  closed: boolean
+}
+
+export interface GitHubBoardItemRef {
+  id: string
+  projectId: string
+  projectNumber: number
+  projectTitle: string
+  projectUrl: string
+  sprintId: string
+  iterationId?: string | null
+  sprintTitle: string
+  status: string
+  statusOptionId?: string | null
+  contentType: string
+  number?: number | null
+  title: string
+  description: string
+  state: string
+  url?: string | null
+  repositoryOwner: string
+  repositoryName: string
+  repositoryFullName: string
+  labels: string[]
+  assignees: string[]
+  subtasks: string[]
+  updatedAt: string
+  isDraft: boolean
+}
+
+export interface GitHubBoardColumn {
+  id: string
+  title: string
+  items: GitHubBoardItemRef[]
+}
+
+export interface GitHubBoardSnapshot {
+  repository: RepositoryRef
+  source: string
+  statusMessage: string
+  projects: GitHubProjectRef[]
+  sprints: SprintRef[]
+  columns: GitHubBoardColumn[]
+  items: GitHubBoardItemRef[]
 }
 
 export interface MissionStep {
@@ -72,6 +132,16 @@ export interface ExternalTaskRef {
   status: string
 }
 
+export interface PullRequestRef {
+  provider: string
+  externalId: string
+  title: string
+  url?: string | null
+  status: string
+  headBranch: string
+  baseBranch: string
+}
+
 export interface AgentSnapshot {
   role: AgentRole
   status: AgentRunStatus
@@ -91,7 +161,11 @@ export interface Mission {
   currentPhase?: string | null
   selectedRepository?: RepositoryRef | null
   selectedSprint?: SprintRef | null
+  selectedWorkItem?: GitHubBoardItemRef | null
   externalTask?: ExternalTaskRef | null
+  pullRequest?: PullRequestRef | null
+  autoCreatePullRequest: boolean
+  workspaceRootPath?: string | null
   steps: MissionStep[]
   patchProposals: PatchProposal[]
   agents: AgentSnapshot[]
@@ -151,6 +225,8 @@ export interface CreateMissionRequest {
   prompt: string
   selectedRepository?: RepositoryRef | null
   selectedSprint?: SprintRef | null
+  selectedWorkItem?: GitHubBoardItemRef | null
+  autoCreatePullRequest?: boolean
 }
 
 export interface DashboardMetric {

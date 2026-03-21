@@ -1,14 +1,13 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
+ï»¿import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import {
   createMission,
   createRealtimeConnection,
   createThread,
   decidePatch,
-  ensureDefaultMilestones,
   fetchDashboard,
   fetchMessages,
-  fetchMilestones,
   fetchModels,
+  fetchRepositoryBoard,
   fetchProgress,
   fetchRepositories,
   fetchThreads,
@@ -18,6 +17,8 @@ import type {
   ChatMessage,
   ChatThread,
   DashboardSnapshot,
+  GitHubBoardItemRef,
+  GitHubBoardSnapshot,
   Mission,
   OllamaModelInfo,
   PatchProposal,
@@ -41,8 +42,10 @@ export function useApexConsole() {
   const [repositories, setRepositories] = useState<RepositoryRef[]>([])
   const [selectedRepoKey, setSelectedRepoKey] = useState('')
   const [repoStatus, setRepoStatus] = useState('GitHub repository listesi yukleniyor...')
+  const [board, setBoard] = useState<GitHubBoardSnapshot | null>(null)
   const [sprints, setSprints] = useState<SprintRef[]>([])
   const [selectedSprintId, setSelectedSprintId] = useState('')
+  const [selectedWorkItemId, setSelectedWorkItemId] = useState('')
   const [progressLogs, setProgressLogs] = useState<ProgressLog[]>(fallback.recentProgressLogs)
   const [models, setModels] = useState<OllamaModelInfo[]>([])
   const [selectedModel, setSelectedModel] = useState('')
@@ -53,9 +56,10 @@ export function useApexConsole() {
 
   const deferredActivities = useDeferredValue(dashboard.recentActivities)
   const deferredProgress = useDeferredValue(progressLogs)
-  const mission = dashboard.activeMission ?? fallback.activeMission!
+  const mission = dashboard.activeMission ?? buildIdleMission(fallback)
   const selectedRepository = useMemo(() => repositories.find((repo) => repoKey(repo) === selectedRepoKey) ?? null, [repositories, selectedRepoKey])
-  const selectedSprint = useMemo(() => sprints.find((sprint) => String(sprint.id) === selectedSprintId) ?? null, [selectedSprintId, sprints])
+  const selectedSprint = useMemo(() => sprints.find((sprint) => sprint.id === selectedSprintId) ?? null, [selectedSprintId, sprints])
+  const selectedWorkItem = useMemo(() => board?.items.find((item) => item.id === selectedWorkItemId) ?? null, [board?.items, selectedWorkItemId])
   const chatModels = useMemo(() => {
     const filtered = models.filter((model) => !/embed/i.test(model.name))
     return filtered.length > 0 ? filtered : models
@@ -67,34 +71,47 @@ export function useApexConsole() {
     let active = true
 
     async function boot() {
-      try {
-        const [snapshot, repoList, modelList, threadList] = await Promise.all([
-          fetchDashboard(),
-          fetchRepositories(),
-          fetchModels(),
-          fetchThreads(),
-        ])
+      const [dashboardResult, repositoriesResult, modelsResult, threadsResult] = await Promise.allSettled([
+        fetchDashboard(),
+        fetchRepositories(),
+        fetchModels(),
+        fetchThreads(),
+      ])
 
-        if (!active) {
-          return
-        }
-
-        startTransition(() => {
-          setDashboard(snapshot)
-          setProgressLogs(snapshot.recentProgressLogs.length > 0 ? snapshot.recentProgressLogs : fallback.recentProgressLogs)
-          setRepositories(repoList)
-          setRepoStatus(repoList.length > 0 ? `${repoList.length} repository hazir` : 'Repository gelmedi. Token erisimi kontrol edilmeli.')
-          setModels(modelList)
-          setThreads(threadList)
-          setSelectedThreadId((current) => current ?? threadList[0]?.id ?? null)
-          setSelectedModel((current) => current || preferredModel(modelList, snapshot.chatModel))
-        })
-      } catch (requestError) {
-        if (active) {
-          setError(requestError instanceof Error ? requestError.message : 'Ilk yukleme basarisiz oldu.')
-          setRepoStatus('Repository lookup basarisiz oldu.')
-        }
+      if (!active) {
+        return
       }
+
+      startTransition(() => {
+        if (dashboardResult.status === 'fulfilled') {
+          setDashboard(dashboardResult.value)
+          setProgressLogs(dashboardResult.value.recentProgressLogs.length > 0 ? dashboardResult.value.recentProgressLogs : fallback.recentProgressLogs)
+        } else {
+          setError(dashboardResult.reason instanceof Error ? dashboardResult.reason.message : 'Dashboard yukleme basarisiz oldu.')
+        }
+
+        if (repositoriesResult.status === 'fulfilled') {
+          setRepositories(repositoriesResult.value)
+          setRepoStatus(
+            repositoriesResult.value.length > 0
+              ? `${repositoriesResult.value.length} repository hazir`
+              : 'Repository gelmedi. .env icine GITHUB_TOKEN, GITHUB_OWNER ve GITHUB_REPO ekle.'
+          )
+        } else {
+          setRepoStatus(repositoriesResult.reason instanceof Error ? repositoriesResult.reason.message : 'Repository lookup basarisiz oldu.')
+        }
+
+        if (modelsResult.status === 'fulfilled') {
+          setModels(modelsResult.value)
+          const modelFallback = dashboardResult.status === 'fulfilled' ? dashboardResult.value.chatModel : fallback.chatModel
+          setSelectedModel((current) => current || preferredModel(modelsResult.value, modelFallback))
+        }
+
+        if (threadsResult.status === 'fulfilled') {
+          setThreads(threadsResult.value)
+          setSelectedThreadId((current) => current ?? threadsResult.value[0]?.id ?? null)
+        }
+      })
     }
 
     void boot()
@@ -139,7 +156,11 @@ export function useApexConsole() {
     }
 
     if (activeMission.selectedSprint) {
-      setSelectedSprintId(String(activeMission.selectedSprint.id))
+      setSelectedSprintId(activeMission.selectedSprint.id)
+    }
+
+    if (activeMission.selectedWorkItem) {
+      setSelectedWorkItemId(activeMission.selectedWorkItem.id)
     }
 
     if (activeMission.id) {
@@ -151,8 +172,10 @@ export function useApexConsole() {
 
   useEffect(() => {
     if (!selectedRepository) {
+      setBoard(null)
       setSprints([])
       setSelectedSprintId('')
+      setSelectedWorkItemId('')
       setRepoStatus(repositories.length > 0 ? `${repositories.length} repository hazir` : 'GitHub repository listesi yukleniyor...')
       return
     }
@@ -160,33 +183,33 @@ export function useApexConsole() {
     const repository = selectedRepository
     let active = true
 
-    async function loadSprints() {
+    async function loadBoard() {
       try {
-        let items = await fetchMilestones(repository.owner, repository.name)
-        if (items.length === 0) {
-          setRepoStatus(`${repository.fullName} icin sprint bulunamadi. Varsayilan sprintler olusturuluyor...`)
-          items = await ensureDefaultMilestones(repository.owner, repository.name)
-        }
+        const snapshot = await fetchRepositoryBoard(repository.owner, repository.name)
 
         if (!active) {
           return
         }
 
-        setSprints(items)
-        setSelectedSprintId((current) => (current && items.some((item) => String(item.id) === current) ? current : String(items[0]?.id ?? '')))
-        setRepoStatus(items.length > 0 ? `${repository.fullName} • ${items.length} sprint hazir` : `${repository.fullName} milestone donmedi`)
+        setBoard(snapshot)
+        setSprints(snapshot.sprints)
+        setSelectedSprintId((current) => (current && snapshot.sprints.some((item) => item.id === current) ? current : snapshot.sprints[0]?.id ?? ''))
+        setSelectedWorkItemId((current) => (current && snapshot.items.some((item) => item.id === current) ? current : ''))
+        setRepoStatus(snapshot.statusMessage || `${repository.fullName} board hazir`)
       } catch (requestError) {
         if (!active) {
           return
         }
 
+        setBoard(null)
         setSprints([])
         setSelectedSprintId('')
+        setSelectedWorkItemId('')
         setRepoStatus(requestError instanceof Error ? requestError.message : 'Sprint lookup basarisiz oldu')
       }
     }
 
-    void loadSprints()
+    void loadBoard()
 
     return () => {
       active = false
@@ -217,6 +240,20 @@ export function useApexConsole() {
     }
   }, [selectedThreadId])
 
+  useEffect(() => {
+    if (!board || !selectedSprintId) {
+      return
+    }
+
+    setSelectedWorkItemId((current) => {
+      if (current && board.items.some((item) => item.id === current && item.sprintId === selectedSprintId)) {
+        return current
+      }
+
+      return ''
+    })
+  }, [board, selectedSprintId])
+
   async function handleCreateMission() {
     setBusy(true)
     setError(null)
@@ -226,6 +263,8 @@ export function useApexConsole() {
         prompt,
         selectedRepository,
         selectedSprint,
+        selectedWorkItem,
+        autoCreatePullRequest: true,
       })) as Mission
 
       startTransition(() => {
@@ -238,6 +277,43 @@ export function useApexConsole() {
       })
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Mission olusturma basarisiz oldu.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDispatchWorkItem(workItem: GitHubBoardItemRef) {
+    const sprintForItem = sprints.find((item) => item.id === workItem.sprintId) ?? selectedSprint ?? null
+    const nextTitle = workItem.title
+    const nextPrompt = buildWorkItemPrompt(workItem, selectedRepository, sprintForItem)
+
+    setSelectedWorkItemId(workItem.id)
+    setSelectedSprintId(workItem.sprintId)
+    setTitle(nextTitle)
+    setPrompt(nextPrompt)
+    setBusy(true)
+    setError(null)
+
+    try {
+      const nextMission = (await createMission({
+        title: nextTitle,
+        prompt: nextPrompt,
+        selectedRepository,
+        selectedSprint: sprintForItem,
+        selectedWorkItem: workItem,
+        autoCreatePullRequest: true,
+      })) as Mission
+
+      startTransition(() => {
+        setDashboard((current) => ({
+          ...current,
+          activeMission: nextMission,
+          agents: nextMission.agents,
+          pendingPatchProposals: nextMission.patchProposals.filter((proposal) => proposal.status === 'PendingReview'),
+        }))
+      })
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Task dispatch basarisiz oldu.')
     } finally {
       setBusy(false)
     }
@@ -292,6 +368,7 @@ export function useApexConsole() {
   }
 
   return {
+    board,
     busy,
     changedFiles,
     chatBusy,
@@ -315,6 +392,8 @@ export function useApexConsole() {
     selectedRepository,
     selectedSprint,
     selectedSprintId,
+    selectedWorkItem,
+    selectedWorkItemId,
     selectedThread,
     selectedThreadId,
     sprints,
@@ -325,9 +404,11 @@ export function useApexConsole() {
     setSelectedModel,
     setSelectedRepoKey,
     setSelectedSprintId,
+    setSelectedWorkItemId,
     setSelectedThreadId,
     setTitle,
     handleCreateMission,
+    handleDispatchWorkItem,
     handleNewThread,
     handlePatchDecision,
     handleSendMessage,
@@ -357,3 +438,44 @@ async function refreshDashboard(
     }
   }
 }
+
+function buildWorkItemPrompt(workItem: GitHubBoardItemRef, repository: RepositoryRef | null, sprint: SprintRef | null) {
+  const subtasks = workItem.subtasks.length > 0
+    ? workItem.subtasks.map((item) => `- ${item}`).join('\n')
+    : '- Gorevi issue aciklamasina gore tamamla.'
+
+  return [
+    `GitHub board gorevini secili repository icinde tamamla: ${workItem.title}.`,
+    repository ? `Repository: ${repository.fullName}.` : 'Repository secimi eksik.',
+    sprint ? `Sprint: ${sprint.title}.` : 'Sprint secimi yok.',
+    `Status lane: ${workItem.status}.`,
+    workItem.description ? `Aciklama:\n${workItem.description}` : 'Aciklama yok.',
+    `Checklist:\n${subtasks}`,
+    'Gerekli degisiklikleri repo klasorlerinde yap, patchleri hazirla, dogrulamayi calistir ve uygunsa PR olustur.',
+  ].join('\n\n')
+}
+
+function buildIdleMission(fallback: DashboardSnapshot): Mission {
+  const now = new Date().toISOString()
+  return {
+    id: 'idle-mission',
+    title: 'Task secimi bekleniyor',
+    prompt: '',
+    status: 'Draft',
+    createdAt: now,
+    updatedAt: now,
+    currentPhase: 'Idle',
+    selectedRepository: null,
+    selectedSprint: null,
+    selectedWorkItem: null,
+    externalTask: null,
+    pullRequest: null,
+    autoCreatePullRequest: true,
+    workspaceRootPath: null,
+    steps: [],
+    patchProposals: [],
+    agents: fallback.agents,
+    artifacts: {},
+  }
+}
+

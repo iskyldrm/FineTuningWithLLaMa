@@ -70,6 +70,7 @@ public sealed class AgentTeamTests
             new NullProgressStream(),
             new NullMemoryStore(),
             new NullWorkspaceToolset(),
+            new NullGitHubCatalog(),
             new UnifiedDiffPatchPolicy(),
             new NullTaskSink(),
             [new StructuredAgentExecutor(AgentRole.Analyst, new FakeModelGateway("analysis"), TimeProvider.System)],
@@ -82,7 +83,7 @@ public sealed class AgentTeamTests
             Title = "Queue test",
             Prompt = "Queue mission",
             SelectedRepository = new RepositoryRef { Owner = "local", Name = "apex", FullName = "local/apex", DefaultBranch = "main" },
-            SelectedSprint = new SprintRef { Id = 7, Number = 7, Title = "Sprint 7", State = "open" }
+            SelectedSprint = new SprintRef { Id = "7", Number = 7, Title = "Sprint 7", State = "open" }
         }, CancellationToken.None);
 
         Assert.Equal(MissionStatus.Queued, mission.Status);
@@ -102,7 +103,8 @@ public sealed class AgentTeamTests
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow,
             SelectedRepository = new RepositoryRef { Owner = "local", Name = "apex", FullName = "local/apex", DefaultBranch = "main" },
-            SelectedSprint = new SprintRef { Id = 12, Number = 12, Title = "Sprint 12", State = "open" },
+            SelectedSprint = new SprintRef { Id = "12", Number = 12, Title = "Sprint 12", State = "open" },
+            AutoCreatePullRequest = true,
             Agents = Enum.GetValues<AgentRole>().Select(role => new AgentSnapshot { Role = role, Label = role.ToString(), UpdatedAt = DateTimeOffset.UtcNow }).ToList()
         };
     }
@@ -246,24 +248,29 @@ public sealed class AgentTeamTests
 
     private sealed class NullWorkspaceToolset : IWorkspaceToolset
     {
-        public Task<WorkspaceSnapshot> CaptureSnapshotAsync(CancellationToken cancellationToken)
+        public Task<WorkspaceSnapshot> CaptureSnapshotAsync(Mission mission, CancellationToken cancellationToken)
         {
             return Task.FromResult(BuildWorkspace());
         }
 
-        public Task<PatchApplyResult> ApplyPatchAsync(PatchProposal proposal, CancellationToken cancellationToken)
+        public Task<PatchApplyResult> ApplyPatchAsync(Mission mission, PatchProposal proposal, CancellationToken cancellationToken)
         {
             return Task.FromResult(new PatchApplyResult(true, string.Empty, string.Empty));
         }
 
-        public Task<PatchApplyResult> RevertPatchAsync(PatchProposal proposal, CancellationToken cancellationToken)
+        public Task<PatchApplyResult> RevertPatchAsync(Mission mission, PatchProposal proposal, CancellationToken cancellationToken)
         {
             return Task.FromResult(new PatchApplyResult(true, string.Empty, string.Empty));
         }
 
-        public Task<TestRunResult> RunValidationAsync(CancellationToken cancellationToken)
+        public Task<TestRunResult> RunValidationAsync(Mission mission, CancellationToken cancellationToken)
         {
             return Task.FromResult(new TestRunResult(true, "ok"));
+        }
+
+        public Task<WorkspaceBranchResult> PublishBranchAsync(Mission mission, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new WorkspaceBranchResult(true, "apex/test", "main", "ok", "repo"));
         }
     }
 
@@ -272,6 +279,43 @@ public sealed class AgentTeamTests
         public Task<ExternalTaskRef> CreateTaskAsync(ExternalTaskDraft draft, CancellationToken cancellationToken)
         {
             return Task.FromResult(new ExternalTaskRef { Provider = "github", ExternalId = "1", Title = draft.Title, Status = "Created" });
+        }
+    }
+
+    private sealed class NullGitHubCatalog : IGitHubCatalog
+    {
+        public Task<IReadOnlyList<RepositoryRef>> ListRepositoriesAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<RepositoryRef>>([]);
+        }
+
+        public Task<IReadOnlyList<SprintRef>> ListMilestonesAsync(string owner, string repository, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<SprintRef>>([]);
+        }
+
+        public Task<IReadOnlyList<SprintRef>> EnsureDefaultMilestonesAsync(string owner, string repository, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<SprintRef>>([]);
+        }
+
+        public Task<GitHubBoardSnapshot> GetRepositoryBoardAsync(string owner, string repository, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new GitHubBoardSnapshot());
+        }
+
+        public Task<PullRequestRef?> CreatePullRequestAsync(Mission mission, WorkspaceBranchResult branchResult, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<PullRequestRef?>(new PullRequestRef
+            {
+                Provider = "github",
+                ExternalId = "1",
+                Title = mission.Title,
+                Status = "Created",
+                HeadBranch = branchResult.BranchName,
+                BaseBranch = branchResult.BaseBranch,
+                Url = "https://example.test/pr/1"
+            });
         }
     }
 }

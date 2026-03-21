@@ -1,5 +1,8 @@
 ﻿namespace Apex.AgentTeam.Api.Models;
 
+using System.Text.Json.Serialization;
+using Apex.AgentTeam.Api.Infrastructure;
+
 public enum AgentRole
 {
     Manager,
@@ -79,7 +82,11 @@ public sealed class Mission
     public string? CurrentPhase { get; set; }
     public RepositoryRef? SelectedRepository { get; set; }
     public SprintRef? SelectedSprint { get; set; }
+    public GitHubBoardItemRef? SelectedWorkItem { get; set; }
     public ExternalTaskRef? ExternalTask { get; set; }
+    public PullRequestRef? PullRequest { get; set; }
+    public bool AutoCreatePullRequest { get; set; } = true;
+    public string? WorkspaceRootPath { get; set; }
     public List<MissionStep> Steps { get; set; } = [];
     public List<PatchProposal> PatchProposals { get; set; } = [];
     public List<AgentSnapshot> Agents { get; set; } = [];
@@ -143,11 +150,76 @@ public sealed class RepositoryRef
 
 public sealed class SprintRef
 {
-    public long Id { get; set; }
+    [JsonConverter(typeof(FlexibleStringJsonConverter))]
+    public string Id { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public int Number { get; set; }
     public string State { get; set; } = string.Empty;
     public DateTimeOffset? DueOn { get; set; }
+    public string? IterationId { get; set; }
+    public string? ProjectId { get; set; }
+    public int? ProjectNumber { get; set; }
+    public string? ProjectTitle { get; set; }
+    public DateTimeOffset? StartDate { get; set; }
+    public int? DurationDays { get; set; }
+}
+
+public sealed class GitHubProjectRef
+{
+    public string Id { get; set; } = string.Empty;
+    public int Number { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public string OwnerLogin { get; set; } = string.Empty;
+    public string OwnerType { get; set; } = string.Empty;
+    public string? ShortDescription { get; set; }
+    public bool Closed { get; set; }
+}
+
+public sealed class GitHubBoardItemRef
+{
+    public string Id { get; set; } = string.Empty;
+    public string ProjectId { get; set; } = string.Empty;
+    public int ProjectNumber { get; set; }
+    public string ProjectTitle { get; set; } = string.Empty;
+    public string ProjectUrl { get; set; } = string.Empty;
+    public string SprintId { get; set; } = string.Empty;
+    public string? IterationId { get; set; }
+    public string SprintTitle { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? StatusOptionId { get; set; }
+    public string ContentType { get; set; } = string.Empty;
+    public int? Number { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string State { get; set; } = string.Empty;
+    public string? Url { get; set; }
+    public string RepositoryOwner { get; set; } = string.Empty;
+    public string RepositoryName { get; set; } = string.Empty;
+    public string RepositoryFullName { get; set; } = string.Empty;
+    public List<string> Labels { get; set; } = [];
+    public List<string> Assignees { get; set; } = [];
+    public List<string> Subtasks { get; set; } = [];
+    public DateTimeOffset UpdatedAt { get; set; }
+    public bool IsDraft { get; set; }
+}
+
+public sealed class GitHubBoardColumn
+{
+    public string Id { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public List<GitHubBoardItemRef> Items { get; set; } = [];
+}
+
+public sealed class GitHubBoardSnapshot
+{
+    public RepositoryRef Repository { get; set; } = new();
+    public string Source { get; set; } = string.Empty;
+    public string StatusMessage { get; set; } = string.Empty;
+    public List<GitHubProjectRef> Projects { get; set; } = [];
+    public List<SprintRef> Sprints { get; set; } = [];
+    public List<GitHubBoardColumn> Columns { get; set; } = [];
+    public List<GitHubBoardItemRef> Items { get; set; } = [];
 }
 
 public sealed class ProgressLog
@@ -168,6 +240,17 @@ public sealed class ExternalTaskRef
     public string Title { get; set; } = string.Empty;
     public string? Url { get; set; }
     public string Status { get; set; } = string.Empty;
+}
+
+public sealed class PullRequestRef
+{
+    public string Provider { get; set; } = "github";
+    public string ExternalId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Url { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string HeadBranch { get; set; } = string.Empty;
+    public string BaseBranch { get; set; } = string.Empty;
 }
 
 public sealed class AgentSnapshot
@@ -240,6 +323,8 @@ public sealed class CreateMissionRequest
     public string Prompt { get; set; } = string.Empty;
     public RepositoryRef? SelectedRepository { get; set; }
     public SprintRef? SelectedSprint { get; set; }
+    public GitHubBoardItemRef? SelectedWorkItem { get; set; }
+    public bool AutoCreatePullRequest { get; set; } = true;
 }
 
 public sealed class PatchDecisionRequest
@@ -258,3 +343,4 @@ public sealed class SendChatMessageRequest
     public string Content { get; set; } = string.Empty;
     public string? Model { get; set; }
 }
+

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+﻿import { useMemo, useState } from 'react'
 import type { AgentRole } from '../types'
 import type { ApexConsoleState } from '../app/useApexConsole'
 import {
@@ -26,6 +26,26 @@ export function AgentsPage({ state }: { state: ApexConsoleState }) {
   }, [pods, roster, selectedPodId])
 
   const capabilityChips = Array.from(new Set(visibleAgents.flatMap((agent) => roleMeta[agent.role].capabilities))).slice(0, 6)
+  const boardItems = useMemo(() => {
+    const items = state.board?.items ?? []
+    return state.selectedSprintId ? items.filter((item) => item.sprintId === state.selectedSprintId) : items
+  }, [state.board?.items, state.selectedSprintId])
+  const boardColumns = useMemo(() => {
+    const grouped = new Map<string, typeof boardItems>()
+    for (const item of boardItems) {
+      const key = item.status || 'Backlog'
+      const current = grouped.get(key) ?? []
+      current.push(item)
+      grouped.set(key, current)
+    }
+
+    return Array.from(grouped.entries()).map(([title, items]) => ({
+      id: title.toLowerCase().replace(/\s+/g, '-'),
+      title,
+      items: items.sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()),
+    }))
+  }, [boardItems])
+  const selectedSprintMeta = state.sprints.find((sprint) => sprint.id === state.selectedSprintId) ?? null
 
   return (
     <div className="ns-page ns-agents-page">
@@ -92,7 +112,7 @@ export function AgentsPage({ state }: { state: ApexConsoleState }) {
             <div className="ns-section-head">
               <div>
                 <p className="ns-eyebrow">Neural Entity Constructor</p>
-                <h2>Mission dispatch ve sprint baglami</h2>
+                <h2>Repo, sprint ve board dispatch</h2>
               </div>
               <span className={`ns-pill ${state.error ? 'is-bad' : 'is-good'}`}>{state.error ?? state.repoStatus}</span>
             </div>
@@ -115,8 +135,8 @@ export function AgentsPage({ state }: { state: ApexConsoleState }) {
                 <select value={state.selectedSprintId} onChange={(event) => state.setSelectedSprintId(event.target.value)} disabled={state.sprints.length === 0}>
                   <option value="">Sprint sec</option>
                   {state.sprints.map((sprint) => (
-                    <option key={sprint.id} value={String(sprint.id)}>
-                      #{sprint.number} {sprint.title}
+                    <option key={sprint.id} value={sprint.id}>
+                      {sprint.projectTitle ? `${sprint.projectTitle} / ` : ''}{sprint.title}
                     </option>
                   ))}
                 </select>
@@ -128,7 +148,7 @@ export function AgentsPage({ state }: { state: ApexConsoleState }) {
               </label>
 
               <button type="button" className="ns-button ns-button--primary ns-button--dispatch" onClick={state.handleCreateMission} disabled={state.busy}>
-                {state.busy ? 'Dispatching...' : 'Synthesize'}
+                {state.busy ? 'Gonderiliyor...' : 'Serbest Gorev Gonder'}
               </button>
             </div>
 
@@ -137,14 +157,100 @@ export function AgentsPage({ state }: { state: ApexConsoleState }) {
                 <span>Prompt</span>
                 <textarea value={state.prompt} onChange={(event) => state.setPrompt(event.target.value)} rows={3} />
               </label>
-              <div className="ns-chip-row">
-                {capabilityChips.map((capability) => (
-                  <span key={capability} className="ns-chip">
-                    {capability}
-                  </span>
-                ))}
+              <div className="ns-task-brief">
+                <div className="ns-chip-row">
+                  {capabilityChips.map((capability) => (
+                    <span key={capability} className="ns-chip">
+                      {capability}
+                    </span>
+                  ))}
+                </div>
+                <div className="ns-card ns-task-selection-card">
+                  <p className="ns-eyebrow">Selected Board Task</p>
+                  {state.selectedWorkItem ? (
+                    <>
+                      <strong>{state.selectedWorkItem.title}</strong>
+                      <p>{state.selectedWorkItem.projectTitle} | {state.selectedWorkItem.status}</p>
+                      <small>{state.selectedWorkItem.sprintTitle}</small>
+                    </>
+                  ) : (
+                    <p>Bir board karti secildiginde gorev promptu otomatik dolacak ve AI takim dispatch butonu kart uzerinde acilacak.</p>
+                  )}
+                </div>
               </div>
             </div>
+          </article>
+
+          <article className="ns-card ns-board-card">
+            <div className="ns-section-head">
+              <div>
+                <p className="ns-eyebrow">GitHub Project Board</p>
+                <h2>{selectedSprintMeta ? selectedSprintMeta.title : 'Sprint board bekleniyor'}</h2>
+              </div>
+              <span className="ns-pill">{boardItems.length} kart</span>
+            </div>
+
+            <div className="ns-board-meta">
+              <span>{state.board?.source ?? 'board'}</span>
+              <strong>{state.board?.projects.length ?? 0} project</strong>
+              <strong>{state.sprints.length} sprint</strong>
+              {state.mission.pullRequest?.url ? (
+                <a className="ns-link-button" href={state.mission.pullRequest.url} target="_blank" rel="noreferrer">
+                  Open PR
+                </a>
+              ) : null}
+            </div>
+
+            {boardColumns.length > 0 ? (
+              <div className="ns-board-columns">
+                {boardColumns.map((column) => (
+                  <section key={column.id} className="ns-board-column">
+                    <header className="ns-board-column__head">
+                      <strong>{column.title}</strong>
+                      <span>{column.items.length}</span>
+                    </header>
+                    <div className="ns-board-column__stack">
+                      {column.items.map((item) => (
+                        <article key={item.id} className={`ns-board-task ${state.selectedWorkItemId === item.id ? 'is-active' : ''}`}>
+                          <div className="ns-board-task__head">
+                            <strong>{item.title}</strong>
+                            <span>{item.number ? `#${item.number}` : item.contentType}</span>
+                          </div>
+                          <p>{item.description || 'Aciklama yok.'}</p>
+                          <div className="ns-chip-row">
+                            <span className="ns-chip">{item.projectTitle}</span>
+                            <span className="ns-chip">{item.sprintTitle}</span>
+                            {item.labels.slice(0, 2).map((label) => (
+                              <span key={label} className="ns-chip">
+                                {label}
+                              </span>
+                            ))}
+                          </div>
+                          {item.subtasks.length > 0 ? (
+                            <div className="ns-board-task__list">
+                              {item.subtasks.slice(0, 3).map((subtask) => (
+                                <small key={subtask}>{subtask}</small>
+                              ))}
+                            </div>
+                          ) : null}
+                          <div className="ns-board-task__footer">
+                            <span>{item.assignees.length > 0 ? item.assignees.join(', ') : 'Unassigned'}</span>
+                            <button type="button" className="ns-button ns-button--primary" onClick={() => state.handleDispatchWorkItem(item)} disabled={state.busy}>
+                              {state.busy ? 'Gonderiliyor...' : 'Manager Agentina Gonder'}
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <div className="ns-board-empty">
+                <strong>Bu sprint icin board karti yok.</strong>
+                <p>Repository sec, sprint sec ve GitHub Project iteration icindeki task veya issue kartlari burada board olarak gelsin.</p>
+              </div>
+            )}
           </article>
 
           <div className="ns-agent-card-grid">
@@ -232,3 +338,4 @@ export function AgentsPage({ state }: { state: ApexConsoleState }) {
     </div>
   )
 }
+

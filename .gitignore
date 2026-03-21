@@ -5,6 +5,7 @@ frontend/node_modules/
 **/bin/
 **/obj/
 .vscode/
+.env
 agent-output-*.md
 frontend/dist/
 src/Apex.AgentTeam.Api/appsettings.Development.json

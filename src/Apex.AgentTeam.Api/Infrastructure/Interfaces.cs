@@ -56,13 +56,15 @@ public interface IPatchPolicy
 
 public interface IWorkspaceToolset
 {
-    Task<WorkspaceSnapshot> CaptureSnapshotAsync(CancellationToken cancellationToken);
+    Task<WorkspaceSnapshot> CaptureSnapshotAsync(Mission mission, CancellationToken cancellationToken);
 
-    Task<PatchApplyResult> ApplyPatchAsync(PatchProposal proposal, CancellationToken cancellationToken);
+    Task<PatchApplyResult> ApplyPatchAsync(Mission mission, PatchProposal proposal, CancellationToken cancellationToken);
 
-    Task<PatchApplyResult> RevertPatchAsync(PatchProposal proposal, CancellationToken cancellationToken);
+    Task<PatchApplyResult> RevertPatchAsync(Mission mission, PatchProposal proposal, CancellationToken cancellationToken);
 
-    Task<TestRunResult> RunValidationAsync(CancellationToken cancellationToken);
+    Task<TestRunResult> RunValidationAsync(Mission mission, CancellationToken cancellationToken);
+
+    Task<WorkspaceBranchResult> PublishBranchAsync(Mission mission, CancellationToken cancellationToken);
 }
 
 public interface IExternalTaskSink
@@ -77,6 +79,10 @@ public interface IGitHubCatalog
     Task<IReadOnlyList<SprintRef>> ListMilestonesAsync(string owner, string repository, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<SprintRef>> EnsureDefaultMilestonesAsync(string owner, string repository, CancellationToken cancellationToken);
+
+    Task<GitHubBoardSnapshot> GetRepositoryBoardAsync(string owner, string repository, CancellationToken cancellationToken);
+
+    Task<PullRequestRef?> CreatePullRequestAsync(Mission mission, WorkspaceBranchResult branchResult, CancellationToken cancellationToken);
 }
 
 public interface IMissionRepository
@@ -151,4 +157,6 @@ public sealed record PatchPolicyDecision(bool IsAllowed, string Reason);
 public sealed record PatchApplyResult(bool Success, string StdOut, string StdErr);
 
 public sealed record TestRunResult(bool Success, string Output);
+
+public sealed record WorkspaceBranchResult(bool Success, string BranchName, string BaseBranch, string Output, string WorkingDirectory);
 

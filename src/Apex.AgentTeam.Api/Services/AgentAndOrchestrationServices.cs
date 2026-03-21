@@ -33,11 +33,11 @@ public sealed class StructuredAgentExecutor : IAgentExecutor
         };
 
         var acceptanceCriteria = Role == AgentRole.Analyst
-            ? BuildAcceptanceCriteria(context.Mission.Prompt, context.Mission.SelectedRepository, context.Mission.SelectedSprint, context.Knowledge)
+            ? BuildAcceptanceCriteria(context.Mission.Prompt, context.Mission.SelectedRepository, context.Mission.SelectedSprint, context.Mission.SelectedWorkItem, context.Knowledge)
             : new List<string>();
 
         ExternalTaskDraft? externalTaskDraft = null;
-        if (Role == AgentRole.Analyst)
+        if (Role == AgentRole.Analyst && context.Mission.SelectedWorkItem is null)
         {
             var criteriaBody = acceptanceCriteria.Count == 0 ? "- Review mission manually" : string.Join(Environment.NewLine, acceptanceCriteria.Select(item => $"- {item}"));
             externalTaskDraft = new ExternalTaskDraft(
@@ -88,7 +88,10 @@ public sealed class StructuredAgentExecutor : IAgentExecutor
 
         var sprintContext = context.Mission.SelectedSprint is null
             ? "No sprint selected."
-            : $"Selected sprint: #{context.Mission.SelectedSprint.Number} {context.Mission.SelectedSprint.Title} ({context.Mission.SelectedSprint.State})";
+            : $"Selected sprint: {context.Mission.SelectedSprint.Title} ({context.Mission.SelectedSprint.State})";
+        var taskContext = context.Mission.SelectedWorkItem is null
+            ? "No GitHub board task selected."
+            : $"Selected task: {context.Mission.SelectedWorkItem.Title} [{context.Mission.SelectedWorkItem.ContentType}] Status={context.Mission.SelectedWorkItem.Status} Sprint={context.Mission.SelectedWorkItem.SprintTitle}{Environment.NewLine}Task details: {Truncate(context.Mission.SelectedWorkItem.Description, 420)}";
 
         return $"""
             Mission title: {context.Mission.Title}
@@ -101,6 +104,9 @@ public sealed class StructuredAgentExecutor : IAgentExecutor
             Sprint context:
             {sprintContext}
 
+            Task context:
+            {taskContext}
+
             Previous summary:
             {context.PreviousSummary ?? "None"}
 
@@ -110,11 +116,14 @@ public sealed class StructuredAgentExecutor : IAgentExecutor
             Workspace sample files:
             {files}
 
+            Workspace root:
+            {context.Workspace.RootPath}
+
             Reply with a concise, implementation-oriented response.
             """;
     }
 
-    private List<string> BuildAcceptanceCriteria(string prompt, RepositoryRef? repository, SprintRef? sprint, IReadOnlyList<KnowledgeChunk> knowledge)
+    private List<string> BuildAcceptanceCriteria(string prompt, RepositoryRef? repository, SprintRef? sprint, GitHubBoardItemRef? workItem, IReadOnlyList<KnowledgeChunk> knowledge)
     {
         var items = prompt.Split(['.', '\n', ';'], StringSplitOptions.RemoveEmptyEntries)
             .Select(item => item.Trim())
@@ -129,7 +138,16 @@ public sealed class StructuredAgentExecutor : IAgentExecutor
 
         if (sprint is not null)
         {
-            items.Add($"Align implementation with milestone #{sprint.Number} {sprint.Title}.");
+            items.Add($"Align implementation with sprint {sprint.Title}.");
+        }
+
+        if (workItem is not null)
+        {
+            items.Add($"Implement GitHub board item '{workItem.Title}' in status lane '{workItem.Status}'.");
+            foreach (var subtask in workItem.Subtasks.Take(4))
+            {
+                items.Add($"Complete checklist item: {subtask}");
+            }
         }
 
         foreach (var reference in knowledge.Take(2))
@@ -202,6 +220,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
     private readonly IProgressStream _progressStream;
     private readonly IMemoryStore _memoryStore;
     private readonly IWorkspaceToolset _workspaceToolset;
+    private readonly IGitHubCatalog _gitHubCatalog;
     private readonly IPatchPolicy _patchPolicy;
     private readonly IExternalTaskSink _externalTaskSink;
     private readonly IReadOnlyDictionary<AgentRole, IAgentExecutor> _executors;
@@ -218,6 +237,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         IProgressStream progressStream,
         IMemoryStore memoryStore,
         IWorkspaceToolset workspaceToolset,
+        IGitHubCatalog gitHubCatalog,
         IPatchPolicy patchPolicy,
         IExternalTaskSink externalTaskSink,
         IEnumerable<IAgentExecutor> executors,
@@ -231,6 +251,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         _progressStream = progressStream;
         _memoryStore = memoryStore;
         _workspaceToolset = workspaceToolset;
+        _gitHubCatalog = gitHubCatalog;
         _patchPolicy = patchPolicy;
         _externalTaskSink = externalTaskSink;
         _executors = executors.ToDictionary(item => item.Role);
@@ -260,6 +281,8 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
             CurrentPhase = "Queued",
             SelectedRepository = request.SelectedRepository,
             SelectedSprint = request.SelectedSprint,
+            SelectedWorkItem = request.SelectedWorkItem,
+            AutoCreatePullRequest = request.AutoCreatePullRequest,
             Agents = BuildRoster(now)
         };
 
@@ -274,7 +297,8 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         {
             ["queueDepth"] = depth.ToString(),
             ["repository"] = mission.SelectedRepository?.FullName ?? string.Empty,
-            ["sprint"] = mission.SelectedSprint?.Title ?? string.Empty
+            ["sprint"] = mission.SelectedSprint?.Title ?? string.Empty,
+            ["task"] = mission.SelectedWorkItem?.Title ?? string.Empty
         }, cancellationToken);
         await _queue.Writer.WriteAsync(mission.Id, cancellationToken);
         return mission;
@@ -358,7 +382,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
             return proposal;
         }
 
-        var applyResult = await _workspaceToolset.ApplyPatchAsync(proposal, cancellationToken);
+        var applyResult = await _workspaceToolset.ApplyPatchAsync(mission, proposal, cancellationToken);
         if (!applyResult.Success)
         {
             proposal.Status = PatchProposalStatus.Failed;
@@ -372,10 +396,10 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
             return proposal;
         }
 
-        var validation = await _workspaceToolset.RunValidationAsync(cancellationToken);
+        var validation = await _workspaceToolset.RunValidationAsync(mission, cancellationToken);
         if (!validation.Success)
         {
-            await _workspaceToolset.RevertPatchAsync(proposal, cancellationToken);
+            await _workspaceToolset.RevertPatchAsync(mission, proposal, cancellationToken);
             proposal.Status = PatchProposalStatus.Failed;
             proposal.ReviewNote = validation.Output;
             proposal.UpdatedAt = _timeProvider.GetUtcNow();
@@ -402,6 +426,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         {
             await PublishActivityAsync(mission.Id, ActivityEventType.MissionCompleted, AgentRole.Manager, mission.Title, "All pending patches were resolved.", cancellationToken);
             await PublishProgressAsync(mission.Id, AgentRole.Manager, "mission-completed", "All pending patches were resolved.", null, cancellationToken);
+            await TryCreatePullRequestAsync(mission, cancellationToken);
         }
 
         return proposal;
@@ -434,6 +459,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         {
             await PublishActivityAsync(mission.Id, ActivityEventType.MissionCompleted, AgentRole.Manager, mission.Title, "Mission closed after patch decisions.", cancellationToken);
             await PublishProgressAsync(mission.Id, AgentRole.Manager, "mission-completed", "Mission closed after patch decisions.", null, cancellationToken);
+            await TryCreatePullRequestAsync(mission, cancellationToken);
         }
 
         return proposal;
@@ -480,10 +506,14 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         await PublishProgressAsync(mission.Id, AgentRole.Manager, "analysis", "Manager started analysis and delegation.", new Dictionary<string, string>
         {
             ["repository"] = mission.SelectedRepository?.FullName ?? string.Empty,
-            ["sprint"] = mission.SelectedSprint?.Title ?? string.Empty
+            ["sprint"] = mission.SelectedSprint?.Title ?? string.Empty,
+            ["task"] = mission.SelectedWorkItem?.Title ?? string.Empty
         }, cancellationToken);
 
-        var workspace = await _workspaceToolset.CaptureSnapshotAsync(cancellationToken);
+        var workspace = await _workspaceToolset.CaptureSnapshotAsync(mission, cancellationToken);
+        mission.WorkspaceRootPath = workspace.RootPath;
+        mission.UpdatedAt = _timeProvider.GetUtcNow();
+        await _repository.SaveMissionAsync(mission, cancellationToken);
         var knowledge = await _memoryStore.SearchAsync(BuildSearchQuery(mission), 5, cancellationToken);
 
         var analyst = await RunAgentAsync(mission, AgentRole.Analyst, workspace, knowledge, null, AgentRole.Manager, cancellationToken);
@@ -542,6 +572,10 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         {
             ["pendingPatches"] = mission.PatchProposals.Count(item => item.Status == PatchProposalStatus.PendingReview).ToString()
         }, cancellationToken);
+        if (mission.Status == MissionStatus.Completed)
+        {
+            await TryCreatePullRequestAsync(mission, cancellationToken);
+        }
     }
 
     private async Task<AgentExecutionResult> RunAgentAsync(Mission mission, AgentRole role, WorkspaceSnapshot workspace, IReadOnlyList<KnowledgeChunk> knowledge, string? previousSummary, AgentRole? delegatedBy, CancellationToken cancellationToken)
@@ -619,6 +653,42 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
 
         await _progressLogStore.AppendAsync(progress, cancellationToken);
         await _progressStream.PublishAsync(progress, cancellationToken);
+    }
+
+    private async Task TryCreatePullRequestAsync(Mission mission, CancellationToken cancellationToken)
+    {
+        if (!mission.AutoCreatePullRequest
+            || mission.SelectedRepository is null
+            || mission.PullRequest is not null
+            || mission.PatchProposals.All(item => item.Status != PatchProposalStatus.Applied))
+        {
+            return;
+        }
+
+        var branchResult = await _workspaceToolset.PublishBranchAsync(mission, cancellationToken);
+        if (!branchResult.Success)
+        {
+            await PublishProgressAsync(mission.Id, AgentRole.Manager, "pr-skipped", branchResult.Output, new Dictionary<string, string>
+            {
+                ["workspace"] = branchResult.WorkingDirectory
+            }, cancellationToken);
+            return;
+        }
+
+        mission.PullRequest = await _gitHubCatalog.CreatePullRequestAsync(mission, branchResult, cancellationToken);
+        mission.UpdatedAt = _timeProvider.GetUtcNow();
+        await _repository.SaveMissionAsync(mission, cancellationToken);
+
+        if (mission.PullRequest is not null)
+        {
+            await PublishActivityAsync(mission.Id, ActivityEventType.AgentOutput, AgentRole.Manager, "Pull request created.", mission.PullRequest.Url ?? mission.PullRequest.Status, cancellationToken);
+            await PublishProgressAsync(mission.Id, AgentRole.Manager, "pull-request", mission.PullRequest.Title, new Dictionary<string, string>
+            {
+                ["branch"] = mission.PullRequest.HeadBranch,
+                ["base"] = mission.PullRequest.BaseBranch,
+                ["url"] = mission.PullRequest.Url ?? string.Empty
+            }, cancellationToken);
+        }
     }
 
     private async Task MarkMissionFailedAsync(Guid missionId, Exception exception, CancellationToken cancellationToken)
@@ -771,6 +841,16 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         if (!string.IsNullOrWhiteSpace(mission.SelectedSprint?.Title))
         {
             builder.Append(' ').Append(mission.SelectedSprint.Title);
+        }
+
+        if (!string.IsNullOrWhiteSpace(mission.SelectedWorkItem?.Title))
+        {
+            builder.Append(' ').Append(mission.SelectedWorkItem.Title);
+        }
+
+        if (!string.IsNullOrWhiteSpace(mission.SelectedWorkItem?.Description))
+        {
+            builder.Append(' ').Append(mission.SelectedWorkItem.Description);
         }
 
         return builder.ToString();
