@@ -11,7 +11,7 @@ Aktif model ornegi: MiniMaxAI/MiniMax-M2.5
 
 1. [example_colab_finetune_llama.ipynb](example_colab_finetune_llama.ipynb) dosyasini Colab'de ac.
 2. GPU runtime secip hucreleri sirayla calistir.
-3. AI OS klasorunu [ai-system/README.md](ai-system/README.md) uzerinden yonet.
+3. AI OS klasorunu bu README altindaki linkler uzerinden yonet.
 
 ## AI Master Plan (Mermaid)
 
@@ -80,4 +80,16 @@ Gerektiginde daha guclu runtime sec veya daha kucuk modelle devam et.
 ## Repo Icerigi
 
 - [example_colab_finetune_llama.ipynb](example_colab_finetune_llama.ipynb): Veri yukleme, egitme, cikti kaydetme
-- [ai-system/README.md](ai-system/README.md): AI OS ana haritasi
+- [ai-system/roadmap/01-foundations.md](ai-system/roadmap/01-foundations.md)
+- [ai-system/roadmap/02-agents.md](ai-system/roadmap/02-agents.md)
+- [ai-system/roadmap/03-finetuning.md](ai-system/roadmap/03-finetuning.md)
+- [ai-system/roadmap/04-rag.md](ai-system/roadmap/04-rag.md)
+- [ai-system/roadmap/05-enterprise.md](ai-system/roadmap/05-enterprise.md)
+- [ai-system/notes/ollama.md](ai-system/notes/ollama.md)
+- [ai-system/notes/vector-db.md](ai-system/notes/vector-db.md)
+- [ai-system/notes/mcp.md](ai-system/notes/mcp.md)
+- [ai-system/projects/telegram-agent.md](ai-system/projects/telegram-agent.md)
+- [ai-system/projects/n8n-ai-workflows.md](ai-system/projects/n8n-ai-workflows.md)
+- [ai-system/projects/enterprise-ai.md](ai-system/projects/enterprise-ai.md)
+- [ai-system/resources/links.md](ai-system/resources/links.md)
+- [ai-system/resources/note-template.md](ai-system/resources/note-template.md)

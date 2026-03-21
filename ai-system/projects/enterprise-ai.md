@@ -1,7 +1,7 @@
 # Enterprise AI Project
 
 ## Related Nodes
-- [[../README]]
+- [[README]]
 - [[../roadmap/05-enterprise]]
 - [[../roadmap/04-rag]]
 - [[../notes/mcp]]
@@ -21,3 +21,4 @@ Kurumsal sureclere baglanan, izlenebilir ve guvenli bir AI sistem gelistirmek.
 - [ ] Fikir
 - [ ] PoC
 - [ ] Uretim
+

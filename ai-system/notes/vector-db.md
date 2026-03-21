@@ -1,7 +1,7 @@
 # Vector DB Notes
 
 ## Related Nodes
-- [[../README]]
+- [[README]]
 - [[../roadmap/04-rag]]
 - [[../projects/n8n-ai-workflows]]
 - [[../projects/enterprise-ai]]
@@ -24,3 +24,4 @@ RAG sistemlerinde dogru dokuman geri cagirimi icin kritik.
 ## Kaynaklar
 - https://qdrant.tech
 - https://www.pinecone.io
+

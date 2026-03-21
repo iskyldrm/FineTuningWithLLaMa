@@ -1,7 +1,7 @@
 # 04 RAG
 
 ## Related Nodes
-- [[../README]]
+- [[README]]
 - [[01-foundations]]
 - [[02-agents]]
 - [[03-finetuning]]
@@ -21,3 +21,4 @@ Dokuman tabanli yanit sistemi kurmak.
 - [ ] Baslanmadi
 - [ ] Devam ediyor
 - [ ] Tamamlandi
+

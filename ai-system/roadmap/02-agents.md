@@ -1,7 +1,7 @@
 # 02 Agents
 
 ## Related Nodes
-- [[../README]]
+- [[README]]
 - [[01-foundations]]
 - [[04-rag]]
 - [[05-enterprise]]
@@ -21,3 +21,4 @@ Gorev odakli agent mimarisi kurmak.
 - [ ] Baslanmadi
 - [ ] Devam ediyor
 - [ ] Tamamlandi
+

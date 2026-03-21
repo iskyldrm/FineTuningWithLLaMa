@@ -1,7 +1,7 @@
 # 03 Finetuning
 
 ## Related Nodes
-- [[../README]]
+- [[README]]
 - [[01-foundations]]
 - [[04-rag]]
 - [[../notes/ollama]]
@@ -20,3 +20,4 @@ Temel modeli veri ile ozellestirmek.
 - [ ] Baslanmadi
 - [ ] Devam ediyor
 - [ ] Tamamlandi
+
