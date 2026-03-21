@@ -7,6 +7,54 @@ Bu repo iki ana parcayi birlestirir:
 
 Aktif model ornegi: MiniMaxAI/MiniMax-M2.5
 
+## Yeni Ogrenimler: MiniMax Agent Team Yaklasimi
+
+Bu bolum, son ogrenim notlarinin ozetidir. Ana fikir: tek bir model degil, model + orchestrator + memory + tools + task sistemi ile AI organizasyonu kurmak.
+
+### Kisa Sonuc
+
+1. MiniMax yaklasimi, role-based multi-agent ekipler icin guclu bir temel sagliyor.
+2. Self-improvement dongusu ile sistem kendi performansini otomatik artirabiliyor.
+3. Basari model seciminden cok sistem mimarisine bagli.
+
+### Ogrenim Linkleri (Alt Notlar)
+
+- [ai-system/insights/01-agent-self-evolution.md](ai-system/insights/01-agent-self-evolution.md)
+- [ai-system/insights/02-agent-harness.md](ai-system/insights/02-agent-harness.md)
+- [ai-system/insights/03-rl-team-workflow.md](ai-system/insights/03-rl-team-workflow.md)
+- [ai-system/insights/04-self-improvement-loop.md](ai-system/insights/04-self-improvement-loop.md)
+- [ai-system/insights/05-agent-teams-native.md](ai-system/insights/05-agent-teams-native.md)
+- [ai-system/insights/06-production-debugging.md](ai-system/insights/06-production-debugging.md)
+- [ai-system/insights/07-office-cs-agents.md](ai-system/insights/07-office-cs-agents.md)
+- [ai-system/insights/08-self-learning-core.md](ai-system/insights/08-self-learning-core.md)
+- [ai-system/insights/09-system-architecture.md](ai-system/insights/09-system-architecture.md)
+- [ai-system/insights/10-model-fit-and-limits.md](ai-system/insights/10-model-fit-and-limits.md)
+
+### Mimari Ozet (Hedef Sistem)
+
+```mermaid
+graph TD
+	O[Orchestrator] --> D[Dev Agent]
+	O --> T[Tester Agent]
+	O --> A[Analyst Agent]
+	O --> P[PM Agent]
+	O --> S[Support Agent]
+
+	D --> M[Shared Memory + Tools]
+	T --> M
+	A --> M
+	P --> M
+	S --> M
+
+	M --> LTM[Long-term Memory: Vector DB]
+	M --> STM[Short-term Context Memory]
+	M --> Q[Task Queue: RabbitMQ or Kafka]
+	M --> TL[Tool Layer: Git CI-CD DB Monitoring]
+
+	style O fill:#f9b,stroke:#333,stroke-width:2px
+	style M fill:#9fd,stroke:#333,stroke-width:2px
+```
+
 ## Hizli Baslangic
 
 1. [example_colab_finetune_llama.ipynb](example_colab_finetune_llama.ipynb) dosyasini Colab'de ac.
@@ -93,3 +141,13 @@ Gerektiginde daha guclu runtime sec veya daha kucuk modelle devam et.
 - [ai-system/projects/enterprise-ai.md](ai-system/projects/enterprise-ai.md)
 - [ai-system/resources/links.md](ai-system/resources/links.md)
 - [ai-system/resources/note-template.md](ai-system/resources/note-template.md)
+- [ai-system/insights/01-agent-self-evolution.md](ai-system/insights/01-agent-self-evolution.md)
+- [ai-system/insights/02-agent-harness.md](ai-system/insights/02-agent-harness.md)
+- [ai-system/insights/03-rl-team-workflow.md](ai-system/insights/03-rl-team-workflow.md)
+- [ai-system/insights/04-self-improvement-loop.md](ai-system/insights/04-self-improvement-loop.md)
+- [ai-system/insights/05-agent-teams-native.md](ai-system/insights/05-agent-teams-native.md)
+- [ai-system/insights/06-production-debugging.md](ai-system/insights/06-production-debugging.md)
+- [ai-system/insights/07-office-cs-agents.md](ai-system/insights/07-office-cs-agents.md)
+- [ai-system/insights/08-self-learning-core.md](ai-system/insights/08-self-learning-core.md)
+- [ai-system/insights/09-system-architecture.md](ai-system/insights/09-system-architecture.md)
+- [ai-system/insights/10-model-fit-and-limits.md](ai-system/insights/10-model-fit-and-limits.md)
