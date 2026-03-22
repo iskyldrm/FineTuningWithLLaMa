@@ -1,5 +1,5 @@
 ﻿import { useMemo, useState } from 'react'
-import type { AgentRole } from '../types'
+import type { AgentRole, AgentToolType } from '../types'
 import type { ApexConsoleState } from '../app/useApexConsole'
 import {
   buildAgentPodGroups,
@@ -10,6 +10,8 @@ import {
   statusTone,
   toneByRunStatus,
 } from '../app/view-models'
+
+const toolTypeOptions: AgentToolType[] = ['ListFiles', 'ReadFile', 'WriteFile', 'SearchCode', 'RunTerminal', 'GitStatus', 'GitDiff', 'GitCommit', 'GitPush', 'CustomCommand']
 
 export function AgentsPage({ state }: { state: ApexConsoleState }) {
   const pods = buildAgentPodGroups(state.dashboard.agents.length > 0 ? state.dashboard.agents : state.fallback.agents)
@@ -46,6 +48,7 @@ export function AgentsPage({ state }: { state: ApexConsoleState }) {
     }))
   }, [boardItems])
   const selectedSprintMeta = state.sprints.find((sprint) => sprint.id === state.selectedSprintId) ?? null
+  const selectedPolicy = state.runtimeCatalog.policies.find((policy) => policy.role === state.selectedPolicyRole) ?? null
 
   return (
     <div className="ns-page ns-agents-page">
@@ -292,6 +295,163 @@ export function AgentsPage({ state }: { state: ApexConsoleState }) {
                 </article>
               )
             })}
+          </div>
+
+          <div className="ns-runtime-grid">
+            <article className="ns-card ns-runtime-card">
+              <div className="ns-section-head">
+                <div>
+                  <p className="ns-eyebrow">Agent Loop Runtime</p>
+                  <h2>Role bazli tool yetkileri</h2>
+                </div>
+                <span className="ns-pill">{selectedPolicy?.executionMode ?? 'Unconfigured'}</span>
+              </div>
+
+              <div className="ns-runtime-form-grid">
+                <label className="ns-field">
+                  <span>Role</span>
+                  <select value={state.selectedPolicyRole} onChange={(event) => state.setSelectedPolicyRole(event.target.value as AgentRole)}>
+                    {roster.map((agent) => (
+                      <option key={agent.role} value={agent.role}>{agent.role}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="ns-field">
+                  <span>Execution Mode</span>
+                  <select
+                    value={state.policyDraft.executionMode}
+                    onChange={(event) => state.setPolicyDraft((current) => ({ ...current, executionMode: event.target.value as 'StructuredPrompt' | 'ToolLoop' }))}
+                  >
+                    <option value="StructuredPrompt">StructuredPrompt</option>
+                    <option value="ToolLoop">ToolLoop</option>
+                  </select>
+                </label>
+
+                <label className="ns-field">
+                  <span>Max Steps</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={24}
+                    value={state.policyDraft.maxSteps}
+                    onChange={(event) => state.setPolicyDraft((current) => ({ ...current, maxSteps: Number(event.target.value) || 1 }))}
+                  />
+                </label>
+              </div>
+
+              <label className="ns-field ns-field--prompt">
+                <span>Writable Roots</span>
+                <textarea
+                  rows={4}
+                  value={state.policyDraft.writableRoots}
+                  onChange={(event) => state.setPolicyDraft((current) => ({ ...current, writableRoots: event.target.value }))}
+                  placeholder={'frontend\nsrc'}
+                />
+              </label>
+
+              <div className="ns-runtime-tools">
+                {state.runtimeCatalog.tools.map((tool) => (
+                  <label key={tool.name} className={`ns-runtime-tool ${state.policyDraft.allowedTools.includes(tool.name) ? 'is-active' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={state.policyDraft.allowedTools.includes(tool.name)}
+                      onChange={() => state.togglePolicyTool(tool.name)}
+                    />
+                    <div>
+                      <strong>{tool.displayName}</strong>
+                      <p>{tool.name} | {tool.type}</p>
+                      <small>{tool.description}</small>
+                    </div>
+                    {tool.destructive ? <span className="ns-pill warn">destructive</span> : null}
+                  </label>
+                ))}
+              </div>
+
+              <div className="ns-runtime-actions">
+                <button type="button" className="ns-button ns-button--primary" onClick={state.handleSavePolicy} disabled={state.runtimeBusy}>
+                  {state.runtimeBusy ? 'Kaydediliyor...' : 'Role Policy Kaydet'}
+                </button>
+              </div>
+            </article>
+
+            <article className="ns-card ns-runtime-card">
+              <div className="ns-section-head">
+                <div>
+                  <p className="ns-eyebrow">Tool Registry</p>
+                  <h2>Custom tool calling tanimla</h2>
+                </div>
+                <span className="ns-pill">{state.runtimeCatalog.tools.length} tool</span>
+              </div>
+
+              <div className="ns-runtime-tool-list">
+                {state.runtimeCatalog.tools.map((tool) => (
+                  <div key={tool.name} className="ns-runtime-tool-list__item">
+                    <div>
+                      <strong>{tool.displayName}</strong>
+                      <p>{tool.name} | {tool.type}</p>
+                    </div>
+                    <div className="ns-chip-row">
+                      <span className="ns-chip">{tool.enabled ? 'enabled' : 'disabled'}</span>
+                      {tool.destructive ? <span className="ns-chip">destructive</span> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="ns-runtime-form-grid">
+                <label className="ns-field">
+                  <span>Name</span>
+                  <input value={state.toolForm.name} onChange={(event) => state.setToolForm((current) => ({ ...current, name: event.target.value }))} placeholder="open_pr" />
+                </label>
+
+                <label className="ns-field">
+                  <span>Display Name</span>
+                  <input value={state.toolForm.displayName} onChange={(event) => state.setToolForm((current) => ({ ...current, displayName: event.target.value }))} placeholder="Open Pull Request" />
+                </label>
+
+                <label className="ns-field">
+                  <span>Type</span>
+                  <select value={state.toolForm.type} onChange={(event) => state.setToolForm((current) => ({ ...current, type: event.target.value as AgentToolType }))}>
+                    {toolTypeOptions.map((type) => (
+                      <option key={type} value={type}>{type}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="ns-field ns-field--prompt">
+                <span>Description</span>
+                <textarea value={state.toolForm.description} onChange={(event) => state.setToolForm((current) => ({ ...current, description: event.target.value }))} rows={3} />
+              </label>
+
+              <label className="ns-field ns-field--prompt">
+                <span>Command Template</span>
+                <textarea
+                  value={state.toolForm.commandTemplate}
+                  onChange={(event) => state.setToolForm((current) => ({ ...current, commandTemplate: event.target.value }))}
+                  rows={3}
+                  placeholder={"gh pr create --title {{title}} --body {{body}}"}
+                />
+              </label>
+
+              <div className="ns-runtime-toggle-row">
+                <label className="ns-runtime-checkbox">
+                  <input type="checkbox" checked={state.toolForm.enabled} onChange={(event) => state.setToolForm((current) => ({ ...current, enabled: event.target.checked }))} />
+                  <span>Enabled</span>
+                </label>
+                <label className="ns-runtime-checkbox">
+                  <input type="checkbox" checked={state.toolForm.destructive} onChange={(event) => state.setToolForm((current) => ({ ...current, destructive: event.target.checked }))} />
+                  <span>Destructive</span>
+                </label>
+              </div>
+
+              <div className="ns-runtime-actions">
+                <button type="button" className="ns-button ns-button--primary" onClick={state.handleSaveTool} disabled={state.runtimeBusy}>
+                  {state.runtimeBusy ? 'Kaydediliyor...' : 'Tool Kaydet'}
+                </button>
+              </div>
+            </article>
           </div>
 
           <article className="ns-card ns-patch-tray">

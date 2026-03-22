@@ -42,6 +42,15 @@ public interface IAgentExecutor
     Task<AgentExecutionResult> ExecuteAsync(AgentExecutionContext context, CancellationToken cancellationToken);
 }
 
+public interface IAgentRuntimeCatalogStore
+{
+    Task<AgentRuntimeCatalog> GetCatalogAsync(CancellationToken cancellationToken);
+
+    Task<AgentToolDefinition> UpsertToolAsync(UpsertAgentToolRequest request, CancellationToken cancellationToken);
+
+    Task<AgentRolePolicy> UpdatePolicyAsync(AgentRole role, UpdateAgentRolePolicyRequest request, CancellationToken cancellationToken);
+}
+
 public interface IMemoryStore
 {
     Task SeedAsync(CancellationToken cancellationToken);
@@ -57,6 +66,24 @@ public interface IPatchPolicy
 public interface IWorkspaceToolset
 {
     Task<WorkspaceSnapshot> CaptureSnapshotAsync(Mission mission, CancellationToken cancellationToken);
+
+    Task<string> ListFilesAsync(Mission mission, string? pattern, int limit, CancellationToken cancellationToken);
+
+    Task<string> ReadFileAsync(Mission mission, string relativePath, int startLine, int maxLines, CancellationToken cancellationToken);
+
+    Task<string> WriteFileAsync(Mission mission, string relativePath, string content, CancellationToken cancellationToken);
+
+    Task<string> SearchCodeAsync(Mission mission, string query, int limit, CancellationToken cancellationToken);
+
+    Task<string> RunTerminalCommandAsync(Mission mission, string command, CancellationToken cancellationToken);
+
+    Task<string> GetGitStatusAsync(Mission mission, CancellationToken cancellationToken);
+
+    Task<string> GetGitDiffAsync(Mission mission, CancellationToken cancellationToken);
+
+    Task<string> CommitAsync(Mission mission, string message, CancellationToken cancellationToken);
+
+    Task<string> PushAsync(Mission mission, string? branchName, CancellationToken cancellationToken);
 
     Task<PatchApplyResult> ApplyPatchAsync(Mission mission, PatchProposal proposal, CancellationToken cancellationToken);
 
@@ -144,9 +171,16 @@ public sealed record ModelTextResponse(string Text, bool UsedFallback);
 
 public sealed record ModelChatResponse(string Content, ChatUsage? Usage, bool UsedFallback);
 
-public sealed record AgentExecutionContext(Mission Mission, WorkspaceSnapshot Workspace, IReadOnlyList<KnowledgeChunk> Knowledge, string? PreviousSummary);
+public sealed record AgentExecutionContext(
+    Mission Mission,
+    WorkspaceSnapshot Workspace,
+    IReadOnlyList<KnowledgeChunk> Knowledge,
+    string? PreviousSummary,
+    Func<AgentExecutionUpdate, CancellationToken, Task>? ProgressCallback = null);
 
 public sealed record AgentExecutionResult(string Summary, IReadOnlyList<string> AcceptanceCriteria, IReadOnlyList<PatchProposal> ProposedPatches, IReadOnlyDictionary<string, string> Artifacts, ExternalTaskDraft? ExternalTaskDraft);
+
+public sealed record AgentExecutionUpdate(string Stage, string Message, IReadOnlyDictionary<string, string>? Metadata = null);
 
 public sealed record ExternalTaskDraft(string Title, string Body, IReadOnlyList<string> Labels, string? RepositoryOwner = null, string? RepositoryName = null);
 

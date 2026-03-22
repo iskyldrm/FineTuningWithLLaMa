@@ -4,6 +4,7 @@ import {
   createRealtimeConnection,
   createThread,
   decidePatch,
+  fetchAgentRuntime,
   fetchDashboard,
   fetchMessages,
   fetchModels,
@@ -11,9 +12,14 @@ import {
   fetchProgress,
   fetchRepositories,
   fetchThreads,
+  saveAgentPolicy,
+  saveAgentTool,
   sendMessage,
 } from '../api'
 import type {
+  AgentRole,
+  AgentRuntimeCatalog,
+  AgentToolType,
   ChatMessage,
   ChatThread,
   DashboardSnapshot,
@@ -53,6 +59,24 @@ export function useApexConsole() {
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
+  const [runtimeCatalog, setRuntimeCatalog] = useState<AgentRuntimeCatalog>({ updatedAt: new Date().toISOString(), tools: [], policies: [] })
+  const [runtimeBusy, setRuntimeBusy] = useState(false)
+  const [selectedPolicyRole, setSelectedPolicyRole] = useState<AgentRole>('Frontend')
+  const [policyDraft, setPolicyDraft] = useState({
+    executionMode: 'ToolLoop' as 'StructuredPrompt' | 'ToolLoop',
+    allowedTools: [] as string[],
+    writableRoots: 'frontend\nsrc',
+    maxSteps: 8,
+  })
+  const [toolForm, setToolForm] = useState({
+    name: '',
+    displayName: '',
+    description: '',
+    type: 'CustomCommand' as AgentToolType,
+    enabled: true,
+    destructive: false,
+    commandTemplate: '',
+  })
 
   const deferredActivities = useDeferredValue(dashboard.recentActivities)
   const deferredProgress = useDeferredValue(progressLogs)
@@ -71,11 +95,12 @@ export function useApexConsole() {
     let active = true
 
     async function boot() {
-      const [dashboardResult, repositoriesResult, modelsResult, threadsResult] = await Promise.allSettled([
+      const [dashboardResult, repositoriesResult, modelsResult, threadsResult, runtimeResult] = await Promise.allSettled([
         fetchDashboard(),
         fetchRepositories(),
         fetchModels(),
         fetchThreads(),
+        fetchAgentRuntime(),
       ])
 
       if (!active) {
@@ -110,6 +135,10 @@ export function useApexConsole() {
         if (threadsResult.status === 'fulfilled') {
           setThreads(threadsResult.value)
           setSelectedThreadId((current) => current ?? threadsResult.value[0]?.id ?? null)
+        }
+
+        if (runtimeResult.status === 'fulfilled') {
+          setRuntimeCatalog(runtimeResult.value)
         }
       })
     }
@@ -254,6 +283,20 @@ export function useApexConsole() {
     })
   }, [board, selectedSprintId])
 
+  useEffect(() => {
+    const policy = runtimeCatalog.policies.find((item) => item.role === selectedPolicyRole)
+    if (!policy) {
+      return
+    }
+
+    setPolicyDraft({
+      executionMode: policy.executionMode,
+      allowedTools: [...policy.allowedTools],
+      writableRoots: policy.writableRoots.join('\n'),
+      maxSteps: policy.maxSteps,
+    })
+  }, [runtimeCatalog, selectedPolicyRole])
+
   async function handleCreateMission() {
     setBusy(true)
     setError(null)
@@ -367,6 +410,79 @@ export function useApexConsole() {
     }
   }
 
+  async function refreshRuntimeCatalog() {
+    const catalog = await fetchAgentRuntime()
+    setRuntimeCatalog(catalog)
+  }
+
+  async function handleSaveTool() {
+    if (!toolForm.name.trim()) {
+      setError('Tool adi zorunlu.')
+      return
+    }
+
+    if (toolForm.type === 'CustomCommand' && !toolForm.commandTemplate.trim()) {
+      setError('CustomCommand tool icin command template gerekli.')
+      return
+    }
+
+    setRuntimeBusy(true)
+    setError(null)
+    try {
+      await saveAgentTool({
+        ...toolForm,
+        name: toolForm.name.trim(),
+        displayName: toolForm.displayName.trim(),
+        description: toolForm.description.trim(),
+        commandTemplate: toolForm.commandTemplate.trim() || null,
+      })
+      await refreshRuntimeCatalog()
+      setToolForm({
+        name: '',
+        displayName: '',
+        description: '',
+        type: 'CustomCommand',
+        enabled: true,
+        destructive: false,
+        commandTemplate: '',
+      })
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Tool kaydedilemedi.')
+    } finally {
+      setRuntimeBusy(false)
+    }
+  }
+
+  async function handleSavePolicy() {
+    setRuntimeBusy(true)
+    setError(null)
+    try {
+      await saveAgentPolicy(selectedPolicyRole, {
+        executionMode: policyDraft.executionMode,
+        allowedTools: policyDraft.allowedTools,
+        writableRoots: policyDraft.writableRoots
+          .split(/\r?\n|,/)
+          .map((item) => item.trim())
+          .filter(Boolean),
+        maxSteps: Number(policyDraft.maxSteps) || 1,
+      })
+      await refreshRuntimeCatalog()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Role policy kaydedilemedi.')
+    } finally {
+      setRuntimeBusy(false)
+    }
+  }
+
+  function togglePolicyTool(toolName: string) {
+    setPolicyDraft((current) => ({
+      ...current,
+      allowedTools: current.allowedTools.includes(toolName)
+        ? current.allowedTools.filter((item) => item !== toolName)
+        : [...current.allowedTools, toolName].sort(),
+    }))
+  }
+
   return {
     board,
     busy,
@@ -396,22 +512,33 @@ export function useApexConsole() {
     selectedWorkItemId,
     selectedThread,
     selectedThreadId,
+    selectedPolicyRole,
     sprints,
     threads,
     title,
+    runtimeBusy,
+    runtimeCatalog,
+    policyDraft,
+    toolForm,
     setChatInput,
+    setPolicyDraft,
     setPrompt,
+    setSelectedPolicyRole,
     setSelectedModel,
     setSelectedRepoKey,
     setSelectedSprintId,
     setSelectedWorkItemId,
     setSelectedThreadId,
+    setToolForm,
     setTitle,
     handleCreateMission,
     handleDispatchWorkItem,
     handleNewThread,
     handlePatchDecision,
+    handleSavePolicy,
+    handleSaveTool,
     handleSendMessage,
+    togglePolicyTool,
   }
 }
 

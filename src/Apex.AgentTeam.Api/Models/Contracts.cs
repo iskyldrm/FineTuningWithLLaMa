@@ -54,6 +54,26 @@ public enum PatchProposalStatus
     Failed
 }
 
+public enum AgentExecutionMode
+{
+    StructuredPrompt,
+    ToolLoop
+}
+
+public enum AgentToolType
+{
+    ListFiles,
+    ReadFile,
+    WriteFile,
+    SearchCode,
+    RunTerminal,
+    GitStatus,
+    GitDiff,
+    GitCommit,
+    GitPush,
+    CustomCommand
+}
+
 public enum ActivityEventType
 {
     MissionCreated,
@@ -114,6 +134,7 @@ public sealed class PatchProposal
     public PatchProposalStatus Status { get; set; } = PatchProposalStatus.PendingReview;
     public List<string> TargetPaths { get; set; } = [];
     public string Diff { get; set; } = string.Empty;
+    public bool AlreadyApplied { get; set; }
     public string? ReviewNote { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
@@ -263,6 +284,33 @@ public sealed class AgentSnapshot
     public int QueueDepth { get; set; }
 }
 
+public sealed class AgentToolDefinition
+{
+    public string Name { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public AgentToolType Type { get; set; }
+    public bool Enabled { get; set; } = true;
+    public bool Destructive { get; set; }
+    public string? CommandTemplate { get; set; }
+}
+
+public sealed class AgentRolePolicy
+{
+    public AgentRole Role { get; set; }
+    public AgentExecutionMode ExecutionMode { get; set; } = AgentExecutionMode.StructuredPrompt;
+    public List<string> AllowedTools { get; set; } = [];
+    public List<string> WritableRoots { get; set; } = [];
+    public int MaxSteps { get; set; } = 6;
+}
+
+public sealed class AgentRuntimeCatalog
+{
+    public DateTimeOffset UpdatedAt { get; set; }
+    public List<AgentToolDefinition> Tools { get; set; } = [];
+    public List<AgentRolePolicy> Policies { get; set; } = [];
+}
+
 public sealed class ChatThread
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -342,5 +390,24 @@ public sealed class SendChatMessageRequest
 {
     public string Content { get; set; } = string.Empty;
     public string? Model { get; set; }
+}
+
+public sealed class UpsertAgentToolRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public AgentToolType Type { get; set; }
+    public bool Enabled { get; set; } = true;
+    public bool Destructive { get; set; }
+    public string? CommandTemplate { get; set; }
+}
+
+public sealed class UpdateAgentRolePolicyRequest
+{
+    public AgentExecutionMode ExecutionMode { get; set; } = AgentExecutionMode.StructuredPrompt;
+    public List<string> AllowedTools { get; set; } = [];
+    public List<string> WritableRoots { get; set; } = [];
+    public int MaxSteps { get; set; } = 6;
 }
 

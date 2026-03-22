@@ -93,6 +93,33 @@ public sealed class AgentTeamTests
         Assert.Contains(await progressStore.GetByMissionAsync(mission.Id, 10, CancellationToken.None), item => item.Stage == "queued");
     }
 
+    [Fact]
+    public async Task AdaptiveExecutor_ToolLoopCreatesAlreadyAppliedPatch()
+    {
+        var workspaceToolset = new LoopWorkspaceToolset();
+        var catalogStore = new InMemoryRuntimeCatalogStore();
+        var executor = new AdaptiveAgentExecutor(
+            AgentRole.Frontend,
+            new SequenceModelGateway([
+                "{\"kind\":\"tool\",\"toolName\":\"write_file\",\"arguments\":{\"path\":\"frontend/src/App.tsx\",\"content\":\"export default function App() { return <main>agent</main> }\"}}",
+                "{\"kind\":\"finish\",\"summary\":\"UI update completed.\"}"
+            ]),
+            workspaceToolset,
+            catalogStore,
+            Options.Create(new ModelOptions()),
+            Options.Create(new RuntimeOptions()),
+            TimeProvider.System);
+
+        var mission = BuildMission();
+        var result = await executor.ExecuteAsync(new AgentExecutionContext(mission, BuildWorkspace(), [], null), CancellationToken.None);
+
+        var patch = Assert.Single(result.ProposedPatches);
+        Assert.True(patch.AlreadyApplied);
+        Assert.Equal(PatchProposalStatus.PendingReview, patch.Status);
+        Assert.Contains("frontend/src/App.tsx", patch.TargetPaths);
+        Assert.Contains("UI update completed.", result.Summary, StringComparison.Ordinal);
+    }
+
     private static Mission BuildMission()
     {
         return new Mission
@@ -148,6 +175,37 @@ public sealed class AgentTeamTests
         public Task<ModelChatResponse> ChatAsync(string model, IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken)
         {
             return Task.FromResult(new ModelChatResponse("assistant", new ChatUsage { EvalCount = 1, PromptEvalCount = 1 }, false));
+        }
+    }
+
+    private sealed class SequenceModelGateway : IModelGateway
+    {
+        private readonly Queue<string> _chatResponses;
+
+        public SequenceModelGateway(IEnumerable<string> chatResponses)
+        {
+            _chatResponses = new Queue<string>(chatResponses);
+        }
+
+        public Task<ModelTextResponse> CompleteAsync(ModelPrompt prompt, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new ModelTextResponse("fallback", false));
+        }
+
+        public Task<float[]> EmbedAsync(string text, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new[] { 0.1f, 0.2f, 0.3f, 0.4f });
+        }
+
+        public Task<IReadOnlyList<OllamaModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<OllamaModelInfo>>([new OllamaModelInfo { Name = "qwen2.5-coder:14b" }]);
+        }
+
+        public Task<ModelChatResponse> ChatAsync(string model, IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken)
+        {
+            var next = _chatResponses.Count > 0 ? _chatResponses.Dequeue() : "{\"kind\":\"finish\",\"summary\":\"done\"}";
+            return Task.FromResult(new ModelChatResponse(next, null, false));
         }
     }
 
@@ -253,6 +311,137 @@ public sealed class AgentTeamTests
             return Task.FromResult(BuildWorkspace());
         }
 
+        public Task<string> ListFilesAsync(Mission mission, string? pattern, int limit, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("frontend/src/App.tsx");
+        }
+
+        public Task<string> ReadFileAsync(Mission mission, string relativePath, int startLine, int maxLines, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("   1: test");
+        }
+
+        public Task<string> WriteFileAsync(Mission mission, string relativePath, string content, CancellationToken cancellationToken)
+        {
+            return Task.FromResult($"Wrote {relativePath}");
+        }
+
+        public Task<string> SearchCodeAsync(Mission mission, string query, int limit, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("frontend/src/App.tsx:1:test");
+        }
+
+        public Task<string> RunTerminalCommandAsync(Mission mission, string command, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("ExitCode: 0");
+        }
+
+        public Task<string> GetGitStatusAsync(Mission mission, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("ExitCode: 0");
+        }
+
+        public Task<string> GetGitDiffAsync(Mission mission, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("Working tree clean.");
+        }
+
+        public Task<string> CommitAsync(Mission mission, string message, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("ExitCode: 0");
+        }
+
+        public Task<string> PushAsync(Mission mission, string? branchName, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("ExitCode: 0");
+        }
+
+        public Task<PatchApplyResult> ApplyPatchAsync(Mission mission, PatchProposal proposal, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new PatchApplyResult(true, string.Empty, string.Empty));
+        }
+
+        public Task<PatchApplyResult> RevertPatchAsync(Mission mission, PatchProposal proposal, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new PatchApplyResult(true, string.Empty, string.Empty));
+        }
+
+        public Task<TestRunResult> RunValidationAsync(Mission mission, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new TestRunResult(true, "ok"));
+        }
+
+        public Task<WorkspaceBranchResult> PublishBranchAsync(Mission mission, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new WorkspaceBranchResult(true, "apex/test", "main", "ok", "repo"));
+        }
+    }
+
+    private sealed class LoopWorkspaceToolset : IWorkspaceToolset
+    {
+        private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["frontend/src/App.tsx"] = "export default function App() { return null }"
+        };
+
+        public Task<WorkspaceSnapshot> CaptureSnapshotAsync(Mission mission, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(BuildWorkspace());
+        }
+
+        public Task<string> ListFilesAsync(Mission mission, string? pattern, int limit, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(string.Join('\n', _files.Keys));
+        }
+
+        public Task<string> ReadFileAsync(Mission mission, string relativePath, int startLine, int maxLines, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(_files.TryGetValue(relativePath, out var content) ? content : string.Empty);
+        }
+
+        public Task<string> WriteFileAsync(Mission mission, string relativePath, string content, CancellationToken cancellationToken)
+        {
+            _files[relativePath] = content;
+            return Task.FromResult($"Wrote {relativePath}");
+        }
+
+        public Task<string> SearchCodeAsync(Mission mission, string query, int limit, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(string.Join('\n', _files.Where(item => item.Value.Contains(query, StringComparison.OrdinalIgnoreCase)).Select(item => item.Key)));
+        }
+
+        public Task<string> RunTerminalCommandAsync(Mission mission, string command, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("ExitCode: 0");
+        }
+
+        public Task<string> GetGitStatusAsync(Mission mission, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("ExitCode: 0\n M frontend/src/App.tsx");
+        }
+
+        public Task<string> GetGitDiffAsync(Mission mission, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("""
+                diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+                --- a/frontend/src/App.tsx
+                +++ b/frontend/src/App.tsx
+                @@ -1 +1 @@
+                -export default function App() { return null }
+                +export default function App() { return <main>agent</main> }
+                """);
+        }
+
+        public Task<string> CommitAsync(Mission mission, string message, CancellationToken cancellationToken)
+        {
+            return Task.FromResult($"ExitCode: 0\n[{message}]");
+        }
+
+        public Task<string> PushAsync(Mission mission, string? branchName, CancellationToken cancellationToken)
+        {
+            return Task.FromResult("ExitCode: 0");
+        }
+
         public Task<PatchApplyResult> ApplyPatchAsync(Mission mission, PatchProposal proposal, CancellationToken cancellationToken)
         {
             return Task.FromResult(new PatchApplyResult(true, string.Empty, string.Empty));
@@ -316,6 +505,45 @@ public sealed class AgentTeamTests
                 BaseBranch = branchResult.BaseBranch,
                 Url = "https://example.test/pr/1"
             });
+        }
+    }
+
+    private sealed class InMemoryRuntimeCatalogStore : IAgentRuntimeCatalogStore
+    {
+        private readonly AgentRuntimeCatalog _catalog = new()
+        {
+            UpdatedAt = DateTimeOffset.UtcNow,
+            Tools =
+            [
+                new AgentToolDefinition { Name = "write_file", DisplayName = "Write File", Description = "Write", Type = AgentToolType.WriteFile, Enabled = true, Destructive = true },
+                new AgentToolDefinition { Name = "git_diff", DisplayName = "Git Diff", Description = "Diff", Type = AgentToolType.GitDiff, Enabled = true }
+            ],
+            Policies =
+            [
+                new AgentRolePolicy
+                {
+                    Role = AgentRole.Frontend,
+                    ExecutionMode = AgentExecutionMode.ToolLoop,
+                    AllowedTools = ["write_file", "git_diff"],
+                    WritableRoots = ["frontend", "src"],
+                    MaxSteps = 4
+                }
+            ]
+        };
+
+        public Task<AgentRuntimeCatalog> GetCatalogAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(_catalog);
+        }
+
+        public Task<AgentToolDefinition> UpsertToolAsync(UpsertAgentToolRequest request, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<AgentRolePolicy> UpdatePolicyAsync(AgentRole role, UpdateAgentRolePolicyRequest request, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
         }
     }
 }

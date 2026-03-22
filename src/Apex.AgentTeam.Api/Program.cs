@@ -17,6 +17,7 @@ builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(Stor
 builder.Services.Configure<MongoOptions>(builder.Configuration.GetSection(MongoOptions.SectionName));
 builder.Services.Configure<ModelOptions>(builder.Configuration.GetSection(ModelOptions.SectionName));
 builder.Services.Configure<WorkspaceOptions>(builder.Configuration.GetSection(WorkspaceOptions.SectionName));
+builder.Services.Configure<RuntimeOptions>(builder.Configuration.GetSection(RuntimeOptions.SectionName));
 builder.Services.Configure<GitHubOptions>(builder.Configuration.GetSection(GitHubOptions.SectionName));
 
 builder.Services.AddCors(options =>
@@ -44,17 +45,18 @@ builder.Services.AddSingleton<IActivityStream>(sp => sp.GetRequiredService<Signa
 builder.Services.AddSingleton<IProgressStream>(sp => sp.GetRequiredService<SignalRRealtimeStream>());
 builder.Services.AddSingleton<IMemoryStore, QdrantMemoryStore>();
 builder.Services.AddSingleton<IWorkspaceToolset, GitWorkspaceToolset>();
+builder.Services.AddSingleton<IAgentRuntimeCatalogStore, JsonAgentRuntimeCatalogStore>();
 builder.Services.AddSingleton<IPatchPolicy, UnifiedDiffPatchPolicy>();
 builder.Services.AddSingleton<IExternalTaskSink, GitHubIssueSink>();
 builder.Services.AddSingleton<IGitHubCatalog, GitHubCatalogService>();
 builder.Services.AddSingleton<IModelGateway, OllamaModelGateway>();
-builder.Services.AddSingleton<IAgentExecutor>(sp => new StructuredAgentExecutor(AgentRole.Analyst, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton<IAgentExecutor>(sp => new StructuredAgentExecutor(AgentRole.WebDev, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton<IAgentExecutor>(sp => new StructuredAgentExecutor(AgentRole.Frontend, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton<IAgentExecutor>(sp => new StructuredAgentExecutor(AgentRole.Backend, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton<IAgentExecutor>(sp => new StructuredAgentExecutor(AgentRole.Tester, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton<IAgentExecutor>(sp => new StructuredAgentExecutor(AgentRole.PM, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton<IAgentExecutor>(sp => new StructuredAgentExecutor(AgentRole.Support, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<IAgentExecutor>(sp => new AdaptiveAgentExecutor(AgentRole.Analyst, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<IWorkspaceToolset>(), sp.GetRequiredService<IAgentRuntimeCatalogStore>(), sp.GetRequiredService<IOptions<ModelOptions>>(), sp.GetRequiredService<IOptions<RuntimeOptions>>(), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<IAgentExecutor>(sp => new AdaptiveAgentExecutor(AgentRole.WebDev, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<IWorkspaceToolset>(), sp.GetRequiredService<IAgentRuntimeCatalogStore>(), sp.GetRequiredService<IOptions<ModelOptions>>(), sp.GetRequiredService<IOptions<RuntimeOptions>>(), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<IAgentExecutor>(sp => new AdaptiveAgentExecutor(AgentRole.Frontend, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<IWorkspaceToolset>(), sp.GetRequiredService<IAgentRuntimeCatalogStore>(), sp.GetRequiredService<IOptions<ModelOptions>>(), sp.GetRequiredService<IOptions<RuntimeOptions>>(), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<IAgentExecutor>(sp => new AdaptiveAgentExecutor(AgentRole.Backend, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<IWorkspaceToolset>(), sp.GetRequiredService<IAgentRuntimeCatalogStore>(), sp.GetRequiredService<IOptions<ModelOptions>>(), sp.GetRequiredService<IOptions<RuntimeOptions>>(), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<IAgentExecutor>(sp => new AdaptiveAgentExecutor(AgentRole.Tester, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<IWorkspaceToolset>(), sp.GetRequiredService<IAgentRuntimeCatalogStore>(), sp.GetRequiredService<IOptions<ModelOptions>>(), sp.GetRequiredService<IOptions<RuntimeOptions>>(), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<IAgentExecutor>(sp => new AdaptiveAgentExecutor(AgentRole.PM, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<IWorkspaceToolset>(), sp.GetRequiredService<IAgentRuntimeCatalogStore>(), sp.GetRequiredService<IOptions<ModelOptions>>(), sp.GetRequiredService<IOptions<RuntimeOptions>>(), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<IAgentExecutor>(sp => new AdaptiveAgentExecutor(AgentRole.Support, sp.GetRequiredService<IModelGateway>(), sp.GetRequiredService<IWorkspaceToolset>(), sp.GetRequiredService<IAgentRuntimeCatalogStore>(), sp.GetRequiredService<IOptions<ModelOptions>>(), sp.GetRequiredService<IOptions<RuntimeOptions>>(), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton<MissionOrchestrator>();
 builder.Services.AddSingleton<IOrchestrator>(sp => sp.GetRequiredService<MissionOrchestrator>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MissionOrchestrator>());
@@ -84,6 +86,15 @@ app.MapGet("/api/github/repositories/{owner}/{repo}/board", async (string owner,
 
 app.MapGet("/api/ollama/models", async (IModelGateway modelGateway, CancellationToken cancellationToken) =>
     Results.Ok(await modelGateway.ListModelsAsync(cancellationToken)));
+
+app.MapGet("/api/agent-runtime", async (IAgentRuntimeCatalogStore catalogStore, CancellationToken cancellationToken) =>
+    Results.Ok(await catalogStore.GetCatalogAsync(cancellationToken)));
+
+app.MapPost("/api/agent-runtime/tools", async (UpsertAgentToolRequest request, IAgentRuntimeCatalogStore catalogStore, CancellationToken cancellationToken) =>
+    Results.Ok(await catalogStore.UpsertToolAsync(request, cancellationToken)));
+
+app.MapPut("/api/agent-runtime/policies/{role}", async (AgentRole role, UpdateAgentRolePolicyRequest request, IAgentRuntimeCatalogStore catalogStore, CancellationToken cancellationToken) =>
+    Results.Ok(await catalogStore.UpdatePolicyAsync(role, request, cancellationToken)));
 
 app.MapGet("/api/missions/{missionId:guid}", async (Guid missionId, IOrchestrator orchestrator, CancellationToken cancellationToken) =>
 {

@@ -50,6 +50,17 @@ public sealed class WorkspaceOptions
     public string RepositoryValidationCommand { get; set; } = "git diff --check";
 }
 
+public sealed class RuntimeOptions
+{
+    public const string SectionName = "Runtime";
+
+    public string RegistryPath { get; set; } = "App_Data\\agent-runtime.json";
+
+    public int DefaultMaxSteps { get; set; } = 8;
+
+    public int MaxToolOutputCharacters { get; set; } = 6_000;
+}
+
 public sealed class GitHubOptions
 {
     public const string SectionName = "GitHub";

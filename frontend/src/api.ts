@@ -1,6 +1,7 @@
 ﻿import * as signalR from '@microsoft/signalr'
 import type {
   ActivityEvent,
+  AgentRuntimeCatalog,
   ChatExchangeResult,
   ChatMessage,
   ChatThread,
@@ -70,6 +71,39 @@ export function fetchProgress(missionId: string) {
 
 export function fetchModels() {
   return requestJson<OllamaModelInfo[]>('/api/ollama/models')
+}
+
+export function fetchAgentRuntime() {
+  return requestJson<AgentRuntimeCatalog>('/api/agent-runtime')
+}
+
+export function saveAgentTool(tool: {
+  name: string
+  displayName: string
+  description: string
+  type: string
+  enabled: boolean
+  destructive: boolean
+  commandTemplate?: string | null
+}) {
+  return requestJson('/api/agent-runtime/tools', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(tool),
+  })
+}
+
+export function saveAgentPolicy(role: string, policy: {
+  executionMode: string
+  allowedTools: string[]
+  writableRoots: string[]
+  maxSteps: number
+}) {
+  return requestJson(`/api/agent-runtime/policies/${role}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(policy),
+  })
 }
 
 export function fetchThreads() {

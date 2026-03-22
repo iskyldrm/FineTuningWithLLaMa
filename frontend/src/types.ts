@@ -3,6 +3,8 @@ export type AgentRunStatus = 'Idle' | 'Thinking' | 'Delegating' | 'Coding' | 'Re
 export type MissionStatus = 'Draft' | 'Queued' | 'Running' | 'AwaitingPatchApproval' | 'Completed' | 'Failed'
 export type MissionStepStatus = 'Pending' | 'InProgress' | 'Completed' | 'Blocked'
 export type PatchProposalStatus = 'PendingReview' | 'Approved' | 'Rejected' | 'Applied' | 'Failed'
+export type AgentExecutionMode = 'StructuredPrompt' | 'ToolLoop'
+export type AgentToolType = 'ListFiles' | 'ReadFile' | 'WriteFile' | 'SearchCode' | 'RunTerminal' | 'GitStatus' | 'GitDiff' | 'GitCommit' | 'GitPush' | 'CustomCommand'
 export type AppRoute = 'dashboard' | 'agents' | 'workflows' | 'execution'
 
 export interface RepositoryRef {
@@ -99,6 +101,7 @@ export interface PatchProposal {
   status: PatchProposalStatus
   targetPaths: string[]
   diff: string
+  alreadyApplied: boolean
   reviewNote?: string | null
   createdAt: string
   updatedAt?: string | null
@@ -149,6 +152,30 @@ export interface AgentSnapshot {
   detail?: string | null
   updatedAt: string
   queueDepth: number
+}
+
+export interface AgentToolDefinition {
+  name: string
+  displayName: string
+  description: string
+  type: AgentToolType
+  enabled: boolean
+  destructive: boolean
+  commandTemplate?: string | null
+}
+
+export interface AgentRolePolicy {
+  role: AgentRole
+  executionMode: AgentExecutionMode
+  allowedTools: string[]
+  writableRoots: string[]
+  maxSteps: number
+}
+
+export interface AgentRuntimeCatalog {
+  updatedAt: string
+  tools: AgentToolDefinition[]
+  policies: AgentRolePolicy[]
 }
 
 export interface Mission {

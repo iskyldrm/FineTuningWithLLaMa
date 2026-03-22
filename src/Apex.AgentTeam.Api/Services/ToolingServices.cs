@@ -1369,7 +1369,7 @@ public sealed class GitHubIssueSink : IExternalTaskSink
     }
 }
 
-public sealed class GitWorkspaceToolset : IWorkspaceToolset
+public sealed partial class GitWorkspaceToolset : IWorkspaceToolset
 {
     private static readonly string[] PreviewExtensions = [".cs", ".md", ".json", ".ts", ".tsx", ".css", ".csproj", ".sln"];
     private static readonly string[] IgnoredSegments = [".git", "node_modules", "bin", "obj", ".nuget", ".dotnet-home"];

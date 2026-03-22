@@ -382,18 +382,25 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
             return proposal;
         }
 
-        var applyResult = await _workspaceToolset.ApplyPatchAsync(mission, proposal, cancellationToken);
-        if (!applyResult.Success)
+        if (!proposal.AlreadyApplied)
         {
-            proposal.Status = PatchProposalStatus.Failed;
-            proposal.ReviewNote = applyResult.StdErr;
-            proposal.UpdatedAt = _timeProvider.GetUtcNow();
-            mission.CurrentPhase = "Patch apply failed";
-            mission.UpdatedAt = _timeProvider.GetUtcNow();
-            await _repository.SaveMissionAsync(mission, cancellationToken);
-            await PublishActivityAsync(mission.Id, ActivityEventType.PatchFailed, proposal.AuthorRole, proposal.Title, applyResult.StdErr, cancellationToken);
-            await PublishProgressAsync(mission.Id, proposal.AuthorRole, "patch-apply-failed", applyResult.StdErr, null, cancellationToken);
-            return proposal;
+            var applyResult = await _workspaceToolset.ApplyPatchAsync(mission, proposal, cancellationToken);
+            if (!applyResult.Success)
+            {
+                proposal.Status = PatchProposalStatus.Failed;
+                proposal.ReviewNote = applyResult.StdErr;
+                proposal.UpdatedAt = _timeProvider.GetUtcNow();
+                mission.CurrentPhase = "Patch apply failed";
+                mission.UpdatedAt = _timeProvider.GetUtcNow();
+                await _repository.SaveMissionAsync(mission, cancellationToken);
+                await PublishActivityAsync(mission.Id, ActivityEventType.PatchFailed, proposal.AuthorRole, proposal.Title, applyResult.StdErr, cancellationToken);
+                await PublishProgressAsync(mission.Id, proposal.AuthorRole, "patch-apply-failed", applyResult.StdErr, null, cancellationToken);
+                return proposal;
+            }
+        }
+        else
+        {
+            await PublishProgressAsync(mission.Id, proposal.AuthorRole, "patch-already-applied", "Patch diff was already present in the workspace.", null, cancellationToken);
         }
 
         var validation = await _workspaceToolset.RunValidationAsync(mission, cancellationToken);
@@ -443,6 +450,23 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
 
         var mission = found.Value.Mission;
         var proposal = found.Value.Proposal;
+        if (proposal.AlreadyApplied)
+        {
+            var revertResult = await _workspaceToolset.RevertPatchAsync(mission, proposal, cancellationToken);
+            if (!revertResult.Success)
+            {
+                proposal.Status = PatchProposalStatus.Failed;
+                proposal.ReviewNote = revertResult.StdErr;
+                proposal.UpdatedAt = _timeProvider.GetUtcNow();
+                mission.UpdatedAt = _timeProvider.GetUtcNow();
+                mission.CurrentPhase = "Patch revert failed";
+                await _repository.SaveMissionAsync(mission, cancellationToken);
+                await PublishActivityAsync(mission.Id, ActivityEventType.PatchFailed, proposal.AuthorRole, proposal.Title, revertResult.StdErr, cancellationToken);
+                await PublishProgressAsync(mission.Id, proposal.AuthorRole, "patch-revert-failed", revertResult.StdErr, null, cancellationToken);
+                return proposal;
+            }
+        }
+
         proposal.Status = PatchProposalStatus.Rejected;
         proposal.ReviewNote = request.ReviewNote ?? "Rejected by operator.";
         proposal.UpdatedAt = _timeProvider.GetUtcNow();
@@ -597,7 +621,12 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         await PublishActivityAsync(mission.Id, ActivityEventType.AgentStatusChanged, role, $"{role} started.", GetWorkingLabel(role), cancellationToken);
         await PublishProgressAsync(mission.Id, role, "started", GetWorkingLabel(role), null, cancellationToken);
 
-        var result = await executor.ExecuteAsync(new AgentExecutionContext(mission, workspace, knowledge, previousSummary), cancellationToken);
+        var result = await executor.ExecuteAsync(new AgentExecutionContext(
+            mission,
+            workspace,
+            knowledge,
+            previousSummary,
+            (update, ct) => PublishProgressAsync(mission.Id, role, update.Stage, update.Message, update.Metadata is null ? null : new Dictionary<string, string>(update.Metadata), ct)), cancellationToken);
         foreach (var artifact in result.Artifacts)
         {
             mission.Artifacts[artifact.Key] = artifact.Value;
