@@ -54,7 +54,7 @@
       Model__ChatModel: ${OLLAMA_CHAT_MODEL:-qwen2.5-coder:14b}
       Model__EmbeddingModel: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
       Workspace__RootPath: /workspace
-      Workspace__RepositoriesRootPath: /workspace/project-workspaces
+      Workspace__RepositoriesRootPath: /workspace-data/repositories
       Workspace__KnowledgeEntryPoint: APEX.md
       Workspace__ValidationCommand: dotnet test /workspace/tests/Apex.AgentTeam.Tests/Apex.AgentTeam.Tests.csproj -v minimal
       GitHub__RepositoryOwner: ${GITHUB_OWNER:-}
@@ -62,6 +62,7 @@
       GitHub__AccessToken: ${GITHUB_TOKEN:-}
     volumes:
       - .:/workspace
+      - repository-workspaces:/workspace-data/repositories
     ports:
       - "5000:8080"
 
@@ -80,3 +81,4 @@ volumes:
   postgres-data:
   qdrant-data:
   mongo-data:
+  repository-workspaces:

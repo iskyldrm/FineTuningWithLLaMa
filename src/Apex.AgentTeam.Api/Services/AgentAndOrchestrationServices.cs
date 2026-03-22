@@ -33,7 +33,7 @@ public sealed class StructuredAgentExecutor : IAgentExecutor
         };
 
         var acceptanceCriteria = Role == AgentRole.Analyst
-            ? BuildAcceptanceCriteria(context.Mission.Prompt, context.Mission.SelectedRepository, context.Mission.SelectedSprint, context.Mission.SelectedWorkItem, context.Knowledge)
+            ? BuildAcceptanceCriteria(GetMissionObjective(context.Mission), context.Mission.SelectedRepository, context.Mission.SelectedSprint, context.Mission.SelectedWorkItem, context.Knowledge)
             : new List<string>();
 
         ExternalTaskDraft? externalTaskDraft = null;
@@ -42,7 +42,7 @@ public sealed class StructuredAgentExecutor : IAgentExecutor
             var criteriaBody = acceptanceCriteria.Count == 0 ? "- Review mission manually" : string.Join(Environment.NewLine, acceptanceCriteria.Select(item => $"- {item}"));
             externalTaskDraft = new ExternalTaskDraft(
                 $"[Analyst] {context.Mission.Title}",
-                $"Mission prompt:{Environment.NewLine}{context.Mission.Prompt}{Environment.NewLine}{Environment.NewLine}Repository:{Environment.NewLine}{context.Mission.SelectedRepository?.FullName ?? "Not selected"}{Environment.NewLine}{Environment.NewLine}Sprint:{Environment.NewLine}{context.Mission.SelectedSprint?.Title ?? "Not selected"}{Environment.NewLine}{Environment.NewLine}Acceptance criteria:{Environment.NewLine}{criteriaBody}{Environment.NewLine}{Environment.NewLine}Analysis:{Environment.NewLine}{summary}",
+                $"Mission prompt:{Environment.NewLine}{GetMissionObjective(context.Mission)}{Environment.NewLine}{Environment.NewLine}Repository:{Environment.NewLine}{context.Mission.SelectedRepository?.FullName ?? "Not selected"}{Environment.NewLine}{Environment.NewLine}Sprint:{Environment.NewLine}{context.Mission.SelectedSprint?.Title ?? "Not selected"}{Environment.NewLine}{Environment.NewLine}Acceptance criteria:{Environment.NewLine}{criteriaBody}{Environment.NewLine}{Environment.NewLine}Analysis:{Environment.NewLine}{summary}",
                 ["agent-team", "analyst", "apex"],
                 context.Mission.SelectedRepository?.Owner,
                 context.Mission.SelectedRepository?.Name);
@@ -96,7 +96,7 @@ public sealed class StructuredAgentExecutor : IAgentExecutor
         return $"""
             Mission title: {context.Mission.Title}
             Mission prompt:
-            {context.Mission.Prompt}
+            {GetMissionObjective(context.Mission)}
 
             Repository context:
             {repoContext}
@@ -210,6 +210,11 @@ public sealed class StructuredAgentExecutor : IAgentExecutor
     {
         return value.Length > limit ? value[..limit] : value;
     }
+
+    private static string GetMissionObjective(Mission mission)
+    {
+        return string.IsNullOrWhiteSpace(mission.Objective) ? mission.Prompt : mission.Objective;
+    }
 }
 
 public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
@@ -221,6 +226,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
     private readonly IMemoryStore _memoryStore;
     private readonly IWorkspaceToolset _workspaceToolset;
     private readonly IGitHubCatalog _gitHubCatalog;
+    private readonly IAgentRuntimeCatalogStore _catalogStore;
     private readonly IPatchPolicy _patchPolicy;
     private readonly IExternalTaskSink _externalTaskSink;
     private readonly IReadOnlyDictionary<AgentRole, IAgentExecutor> _executors;
@@ -238,6 +244,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         IMemoryStore memoryStore,
         IWorkspaceToolset workspaceToolset,
         IGitHubCatalog gitHubCatalog,
+        IAgentRuntimeCatalogStore catalogStore,
         IPatchPolicy patchPolicy,
         IExternalTaskSink externalTaskSink,
         IEnumerable<IAgentExecutor> executors,
@@ -252,6 +259,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         _memoryStore = memoryStore;
         _workspaceToolset = workspaceToolset;
         _gitHubCatalog = gitHubCatalog;
+        _catalogStore = catalogStore;
         _patchPolicy = patchPolicy;
         _externalTaskSink = externalTaskSink;
         _executors = executors.ToDictionary(item => item.Role);
@@ -264,21 +272,39 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
 
     public int QueueDepth => Volatile.Read(ref _queueDepth);
 
-    public async Task<Mission> CreateMissionAsync(CreateMissionRequest request, CancellationToken cancellationToken)
+    public Task<Mission> CreateMissionAsync(CreateMissionRequest request, CancellationToken cancellationToken)
+    {
+        return CreateRunAsync(new CreateRunRequest
+        {
+            Title = request.Title,
+            Objective = request.Prompt,
+            SelectedRepository = request.SelectedRepository,
+            SelectedSprint = request.SelectedSprint,
+            SelectedWorkItem = request.SelectedWorkItem,
+            SwarmTemplate = SwarmTemplate.Hierarchical,
+            AutoCreatePullRequest = request.AutoCreatePullRequest
+        }, cancellationToken);
+    }
+
+    public async Task<Mission> CreateRunAsync(CreateRunRequest request, CancellationToken cancellationToken)
     {
         await _repository.InitializeAsync(cancellationToken);
         await _progressLogStore.InitializeAsync(cancellationToken);
 
         var now = _timeProvider.GetUtcNow();
+        var objective = request.Objective?.Trim() ?? string.Empty;
         var mission = new Mission
         {
             Id = Guid.NewGuid(),
-            Title = string.IsNullOrWhiteSpace(request.Title) ? BuildFallbackTitle(request.Prompt) : request.Title.Trim(),
-            Prompt = request.Prompt.Trim(),
+            Title = string.IsNullOrWhiteSpace(request.Title) ? BuildFallbackTitle(objective) : request.Title.Trim(),
+            Prompt = objective,
+            Objective = objective,
+            SwarmTemplate = request.SwarmTemplate,
             Status = MissionStatus.Queued,
             CreatedAt = now,
             UpdatedAt = now,
             CurrentPhase = "Queued",
+            IsArchived = false,
             SelectedRepository = request.SelectedRepository,
             SelectedSprint = request.SelectedSprint,
             SelectedWorkItem = request.SelectedWorkItem,
@@ -291,14 +317,15 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         SetAgentState(mission, AgentRole.Manager, AgentRunStatus.Delegating, $"Queued with depth {depth}");
 
         await _repository.SaveMissionAsync(mission, cancellationToken);
-        await PublishActivityAsync(mission.Id, ActivityEventType.MissionCreated, null, $"Mission '{mission.Title}' queued.", mission.Prompt, cancellationToken);
+        await PublishActivityAsync(mission.Id, ActivityEventType.MissionCreated, null, $"Run '{mission.Title}' queued.", GetMissionObjective(mission), cancellationToken);
         await PublishActivityAsync(mission.Id, ActivityEventType.QueueStatusChanged, AgentRole.Manager, $"Logical queue depth is {depth}.", "Mission accepted by orchestrator.", cancellationToken);
         await PublishProgressAsync(mission.Id, AgentRole.Manager, "queued", "Mission accepted by orchestrator.", new Dictionary<string, string>
         {
             ["queueDepth"] = depth.ToString(),
             ["repository"] = mission.SelectedRepository?.FullName ?? string.Empty,
             ["sprint"] = mission.SelectedSprint?.Title ?? string.Empty,
-            ["task"] = mission.SelectedWorkItem?.Title ?? string.Empty
+            ["task"] = mission.SelectedWorkItem?.Title ?? string.Empty,
+            ["swarmTemplate"] = mission.SwarmTemplate.ToString()
         }, cancellationToken);
         await _queue.Writer.WriteAsync(mission.Id, cancellationToken);
         return mission;
@@ -308,6 +335,12 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
     {
         await _repository.InitializeAsync(cancellationToken);
         return await _repository.GetMissionAsync(missionId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Mission>> ListRunsAsync(CancellationToken cancellationToken)
+    {
+        await _repository.InitializeAsync(cancellationToken);
+        return await _repository.ListMissionsAsync(40, includeArchived: false, cancellationToken);
     }
 
     public async Task<IReadOnlyList<ActivityEvent>> GetActivitiesAsync(Guid missionId, CancellationToken cancellationToken)
@@ -322,26 +355,102 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         return await _progressLogStore.GetByMissionAsync(missionId, 120, cancellationToken);
     }
 
-    public async Task<DashboardSnapshot> GetDashboardAsync(CancellationToken cancellationToken)
+    public async Task<OverviewSnapshot> GetOverviewAsync(CancellationToken cancellationToken)
     {
         await _repository.InitializeAsync(cancellationToken);
+        var activeRun = await _repository.GetActiveMissionAsync(cancellationToken);
+        var recentRuns = await _repository.ListMissionsAsync(12, includeArchived: false, cancellationToken);
+        if (activeRun is not null)
+        {
+            recentRuns = recentRuns.Where(item => item.Id != activeRun.Id).ToList();
+        }
+
+        return new OverviewSnapshot
+        {
+            ActiveRun = activeRun,
+            RecentRuns = recentRuns.ToList(),
+            System = new OverviewSystemSnapshot
+            {
+                LogicalQueueDepth = QueueDepth,
+                ChatModel = _modelOptions.ChatModel,
+                PhysicalWorkerCount = _modelOptions.PhysicalWorkerCount
+            },
+            Agents = activeRun?.Agents ?? BuildRoster(_timeProvider.GetUtcNow())
+        };
+    }
+
+    public async Task<DashboardSnapshot> GetDashboardAsync(CancellationToken cancellationToken)
+    {
         await _progressLogStore.InitializeAsync(cancellationToken);
-        var mission = await _repository.GetLatestMissionAsync(cancellationToken);
-        var agents = mission?.Agents ?? BuildRoster(_timeProvider.GetUtcNow());
+        var overview = await GetOverviewAsync(cancellationToken);
+        var mission = overview.ActiveRun;
         var activities = mission is null ? [] : (await _repository.GetActivitiesAsync(mission.Id, cancellationToken)).Reverse().ToList();
         var progress = mission is null ? [] : (await _progressLogStore.GetByMissionAsync(mission.Id, 30, cancellationToken)).ToList();
 
         return new DashboardSnapshot
         {
             ActiveMission = mission,
-            Agents = agents,
+            Agents = overview.Agents,
             RecentActivities = activities.TakeLast(20).ToList(),
             RecentProgressLogs = progress,
             PendingPatchProposals = mission?.PatchProposals.Where(item => item.Status == PatchProposalStatus.PendingReview).ToList() ?? [],
-            LogicalQueueDepth = QueueDepth,
-            ChatModel = _modelOptions.ChatModel,
-            PhysicalWorkerCount = _modelOptions.PhysicalWorkerCount
+            LogicalQueueDepth = overview.System.LogicalQueueDepth,
+            ChatModel = overview.System.ChatModel,
+            PhysicalWorkerCount = overview.System.PhysicalWorkerCount
         };
+    }
+
+    public async Task<Mission?> ArchiveRunAsync(Guid missionId, CancellationToken cancellationToken)
+    {
+        await _repository.InitializeAsync(cancellationToken);
+        var mission = await _repository.GetMissionAsync(missionId, cancellationToken);
+        if (mission is null)
+        {
+            return null;
+        }
+
+        mission.IsArchived = true;
+        mission.ArchivedAt = _timeProvider.GetUtcNow();
+        mission.UpdatedAt = mission.ArchivedAt.Value;
+        if (mission.Status is MissionStatus.Queued or MissionStatus.Running or MissionStatus.AwaitingPatchApproval)
+        {
+            mission.Status = MissionStatus.Cancelled;
+            mission.CancelledAt ??= mission.ArchivedAt;
+            mission.CancelledReason ??= "Archived by operator.";
+        }
+
+        mission.CurrentPhase = "Archived";
+        SetAgentState(mission, AgentRole.Manager, AgentRunStatus.Waiting, "Archived by operator");
+        await _repository.SaveMissionAsync(mission, cancellationToken);
+        await PublishActivityAsync(mission.Id, ActivityEventType.QueueStatusChanged, AgentRole.Manager, "Run archived.", mission.Title, cancellationToken);
+        await PublishProgressAsync(mission.Id, AgentRole.Manager, "run-archived", "Run archived by operator.", null, cancellationToken);
+        return mission;
+    }
+
+    public async Task<Mission?> CancelRunAsync(Guid missionId, CancellationToken cancellationToken)
+    {
+        await _repository.InitializeAsync(cancellationToken);
+        var mission = await _repository.GetMissionAsync(missionId, cancellationToken);
+        if (mission is null)
+        {
+            return null;
+        }
+
+        if (mission.Status is MissionStatus.Completed or MissionStatus.Failed or MissionStatus.Cancelled)
+        {
+            return mission;
+        }
+
+        mission.Status = MissionStatus.Cancelled;
+        mission.CancelledAt = _timeProvider.GetUtcNow();
+        mission.CancelledReason = "Cancelled by operator.";
+        mission.CurrentPhase = "Cancelled";
+        mission.UpdatedAt = mission.CancelledAt.Value;
+        SetAgentState(mission, AgentRole.Manager, AgentRunStatus.Waiting, "Cancelled by operator");
+        await _repository.SaveMissionAsync(mission, cancellationToken);
+        await PublishActivityAsync(mission.Id, ActivityEventType.QueueStatusChanged, AgentRole.Manager, "Run cancelled.", mission.Title, cancellationToken);
+        await PublishProgressAsync(mission.Id, AgentRole.Manager, "run-cancelled", "Run cancelled by operator.", null, cancellationToken);
+        return mission;
     }
 
     public async Task<PatchProposal?> ApprovePatchAsync(Guid proposalId, PatchDecisionRequest request, CancellationToken cancellationToken)
@@ -515,82 +624,101 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
     private async Task ProcessMissionAsync(Guid missionId, CancellationToken cancellationToken)
     {
         var mission = await _repository.GetMissionAsync(missionId, cancellationToken);
-        if (mission is null)
+        if (mission is null || mission.IsArchived || mission.Status == MissionStatus.Cancelled)
         {
             return;
         }
 
+        var runtimeCatalog = await _catalogStore.GetCatalogAsync(cancellationToken);
+        var swarmPlan = BuildSwarmAssignments(mission.SwarmTemplate);
+        ValidateRunCapabilities(runtimeCatalog, swarmPlan);
+
         mission.Status = MissionStatus.Running;
-        mission.CurrentPhase = "Analysis";
+        mission.CurrentPhase = GetPhaseForRole(AgentRole.Analyst);
         mission.UpdatedAt = _timeProvider.GetUtcNow();
         UpdateQueueDepth(mission, QueueDepth);
         SetAgentState(mission, AgentRole.Manager, AgentRunStatus.Delegating, "Analyzing requirements and delegating work");
-        await _repository.SaveMissionAsync(mission, cancellationToken);
+        if (!await TrySaveProcessingMissionAsync(mission, cancellationToken))
+        {
+            return;
+        }
         await PublishActivityAsync(mission.Id, ActivityEventType.AgentStatusChanged, AgentRole.Manager, "Manager is delegating.", mission.CurrentPhase ?? string.Empty, cancellationToken);
         await PublishProgressAsync(mission.Id, AgentRole.Manager, "analysis", "Manager started analysis and delegation.", new Dictionary<string, string>
         {
             ["repository"] = mission.SelectedRepository?.FullName ?? string.Empty,
             ["sprint"] = mission.SelectedSprint?.Title ?? string.Empty,
-            ["task"] = mission.SelectedWorkItem?.Title ?? string.Empty
+            ["task"] = mission.SelectedWorkItem?.Title ?? string.Empty,
+            ["swarmTemplate"] = mission.SwarmTemplate.ToString()
         }, cancellationToken);
 
         var workspace = await _workspaceToolset.CaptureSnapshotAsync(mission, cancellationToken);
         mission.WorkspaceRootPath = workspace.RootPath;
         mission.UpdatedAt = _timeProvider.GetUtcNow();
-        await _repository.SaveMissionAsync(mission, cancellationToken);
+        if (!await TrySaveProcessingMissionAsync(mission, cancellationToken))
+        {
+            return;
+        }
         var knowledge = await _memoryStore.SearchAsync(BuildSearchQuery(mission), 5, cancellationToken);
+        var results = new Dictionary<AgentRole, AgentExecutionResult>();
 
-        var analyst = await RunAgentAsync(mission, AgentRole.Analyst, workspace, knowledge, null, AgentRole.Manager, cancellationToken);
-        if (mission.Steps.Count == 0)
+        foreach (var assignment in swarmPlan)
         {
-            mission.Steps = BuildSteps(analyst.AcceptanceCriteria);
-            MarkStep(mission, AgentRole.Analyst, MissionStepStatus.Completed, analyst.Summary);
-        }
-
-        if (analyst.ExternalTaskDraft is not null)
-        {
-            mission.ExternalTask = await _externalTaskSink.CreateTaskAsync(analyst.ExternalTaskDraft, cancellationToken);
+            mission.CurrentPhase = GetPhaseForRole(assignment.Role);
             mission.UpdatedAt = _timeProvider.GetUtcNow();
-            await _repository.SaveMissionAsync(mission, cancellationToken);
-            await PublishActivityAsync(mission.Id, ActivityEventType.ExternalTaskCreated, AgentRole.Analyst, mission.ExternalTask.Title, mission.ExternalTask.Url ?? mission.ExternalTask.Status, cancellationToken);
-            await PublishProgressAsync(mission.Id, AgentRole.Analyst, "external-task", mission.ExternalTask.Title, new Dictionary<string, string>
+            if (!await TrySaveProcessingMissionAsync(mission, cancellationToken))
             {
-                ["status"] = mission.ExternalTask.Status,
-                ["url"] = mission.ExternalTask.Url ?? string.Empty
-            }, cancellationToken);
+                return;
+            }
+
+            var result = await RunAgentAsync(
+                mission,
+                assignment.Role,
+                workspace,
+                knowledge,
+                BuildPreviousSummary(assignment.Role, results),
+                assignment.DelegatedBy,
+                runtimeCatalog,
+                cancellationToken);
+
+            if (!await CanContinueProcessingMissionAsync(mission, cancellationToken))
+            {
+                return;
+            }
+
+            results[assignment.Role] = result;
+            if (mission.Steps.Count == 0 && assignment.Role == AgentRole.Analyst)
+            {
+                mission.Steps = BuildSteps(mission.SwarmTemplate, result.AcceptanceCriteria);
+            }
+
+            MarkStep(mission, assignment.Role, MissionStepStatus.Completed, result.Summary);
+
+            if (assignment.Role == AgentRole.Analyst && result.ExternalTaskDraft is not null)
+            {
+                mission.ExternalTask = await _externalTaskSink.CreateTaskAsync(result.ExternalTaskDraft, cancellationToken);
+                mission.UpdatedAt = _timeProvider.GetUtcNow();
+                if (!await TrySaveProcessingMissionAsync(mission, cancellationToken))
+                {
+                    return;
+                }
+                await PublishActivityAsync(mission.Id, ActivityEventType.ExternalTaskCreated, AgentRole.Analyst, mission.ExternalTask.Title, mission.ExternalTask.Url ?? mission.ExternalTask.Status, cancellationToken);
+                await PublishProgressAsync(mission.Id, AgentRole.Analyst, "external-task", mission.ExternalTask.Title, new Dictionary<string, string>
+                {
+                    ["status"] = mission.ExternalTask.Status,
+                    ["url"] = mission.ExternalTask.Url ?? string.Empty
+                }, cancellationToken);
+            }
         }
-
-        var webDev = await RunAgentAsync(mission, AgentRole.WebDev, workspace, knowledge, analyst.Summary, AgentRole.Manager, cancellationToken);
-        MarkStep(mission, AgentRole.WebDev, MissionStepStatus.Completed, webDev.Summary);
-        await _repository.SaveMissionAsync(mission, cancellationToken);
-
-        var frontend = await RunAgentAsync(mission, AgentRole.Frontend, workspace, knowledge, webDev.Summary, AgentRole.WebDev, cancellationToken);
-        MarkStep(mission, AgentRole.Frontend, MissionStepStatus.Completed, frontend.Summary);
-        await _repository.SaveMissionAsync(mission, cancellationToken);
-
-        var backend = await RunAgentAsync(mission, AgentRole.Backend, workspace, knowledge, webDev.Summary, AgentRole.WebDev, cancellationToken);
-        MarkStep(mission, AgentRole.Backend, MissionStepStatus.Completed, backend.Summary);
-        await _repository.SaveMissionAsync(mission, cancellationToken);
-
-        var testerSummary = $"Frontend patch count: {frontend.ProposedPatches.Count}, Backend patch count: {backend.ProposedPatches.Count}";
-        var tester = await RunAgentAsync(mission, AgentRole.Tester, workspace, knowledge, testerSummary, AgentRole.Backend, cancellationToken);
-        MarkStep(mission, AgentRole.Tester, MissionStepStatus.Completed, tester.Summary);
-
-        var pm = await RunAgentAsync(mission, AgentRole.PM, workspace, knowledge, tester.Summary, AgentRole.Tester, cancellationToken);
-        MarkStep(mission, AgentRole.PM, MissionStepStatus.Completed, pm.Summary);
-
-        var support = await RunAgentAsync(mission, AgentRole.Support, workspace, knowledge, pm.Summary, AgentRole.PM, cancellationToken);
-        MarkStep(mission, AgentRole.Support, MissionStepStatus.Completed, support.Summary);
 
         SetAgentState(mission, AgentRole.Manager, AgentRunStatus.Completed, mission.PatchProposals.Any(item => item.Status == PatchProposalStatus.PendingReview)
             ? "Awaiting operator patch review"
             : "Mission completed");
-        mission.Status = mission.PatchProposals.Any(item => item.Status == PatchProposalStatus.PendingReview)
-            ? MissionStatus.AwaitingPatchApproval
-            : MissionStatus.Completed;
-        mission.CurrentPhase = mission.Status == MissionStatus.Completed ? "Completed" : "Awaiting patch approval";
+        FinalizeMissionIfResolved(mission);
         mission.UpdatedAt = _timeProvider.GetUtcNow();
-        await _repository.SaveMissionAsync(mission, cancellationToken);
+        if (!await TrySaveProcessingMissionAsync(mission, cancellationToken))
+        {
+            return;
+        }
         await PublishActivityAsync(mission.Id, ActivityEventType.MissionCompleted, AgentRole.Manager, mission.Title, mission.CurrentPhase ?? string.Empty, cancellationToken);
         await PublishProgressAsync(mission.Id, AgentRole.Manager, mission.Status == MissionStatus.Completed ? "mission-completed" : "awaiting-patch-review", mission.CurrentPhase ?? string.Empty, new Dictionary<string, string>
         {
@@ -602,11 +730,12 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         }
     }
 
-    private async Task<AgentExecutionResult> RunAgentAsync(Mission mission, AgentRole role, WorkspaceSnapshot workspace, IReadOnlyList<KnowledgeChunk> knowledge, string? previousSummary, AgentRole? delegatedBy, CancellationToken cancellationToken)
+    private async Task<AgentExecutionResult> RunAgentAsync(Mission mission, AgentRole role, WorkspaceSnapshot workspace, IReadOnlyList<KnowledgeChunk> knowledge, string? previousSummary, AgentRole? delegatedBy, AgentRuntimeCatalog runtimeCatalog, CancellationToken cancellationToken)
     {
         var executor = _executors[role];
         if (delegatedBy is not null)
         {
+            EnsureDelegationAllowed(runtimeCatalog, delegatedBy.Value, role);
             await PublishProgressAsync(mission.Id, delegatedBy, "delegation", $"{delegatedBy} delegated work to {role}.", new Dictionary<string, string>
             {
                 ["fromRole"] = delegatedBy.Value.ToString(),
@@ -617,7 +746,10 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         SetAgentState(mission, role, GetWorkingStatus(role), GetWorkingLabel(role));
         MarkStep(mission, role, MissionStepStatus.InProgress, GetWorkingLabel(role));
         mission.UpdatedAt = _timeProvider.GetUtcNow();
-        await _repository.SaveMissionAsync(mission, cancellationToken);
+        if (!await TrySaveProcessingMissionAsync(mission, cancellationToken))
+        {
+            return BuildArchivedExecutionResult();
+        }
         await PublishActivityAsync(mission.Id, ActivityEventType.AgentStatusChanged, role, $"{role} started.", GetWorkingLabel(role), cancellationToken);
         await PublishProgressAsync(mission.Id, role, "started", GetWorkingLabel(role), null, cancellationToken);
 
@@ -627,6 +759,11 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
             knowledge,
             previousSummary,
             (update, ct) => PublishProgressAsync(mission.Id, role, update.Stage, update.Message, update.Metadata is null ? null : new Dictionary<string, string>(update.Metadata), ct)), cancellationToken);
+        if (!await CanContinueProcessingMissionAsync(mission, cancellationToken))
+        {
+            return BuildArchivedExecutionResult();
+        }
+
         foreach (var artifact in result.Artifacts)
         {
             mission.Artifacts[artifact.Key] = artifact.Value;
@@ -644,7 +781,10 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
 
         SetAgentState(mission, role, AgentRunStatus.Completed, Truncate(result.Summary, 120));
         mission.UpdatedAt = _timeProvider.GetUtcNow();
-        await _repository.SaveMissionAsync(mission, cancellationToken);
+        if (!await TrySaveProcessingMissionAsync(mission, cancellationToken))
+        {
+            return result;
+        }
         await PublishActivityAsync(mission.Id, ActivityEventType.AgentOutput, role, $"{role} completed.", result.Summary, cancellationToken);
         await PublishProgressAsync(mission.Id, role, "completed", result.Summary, null, cancellationToken);
         return result;
@@ -706,7 +846,10 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
 
         mission.PullRequest = await _gitHubCatalog.CreatePullRequestAsync(mission, branchResult, cancellationToken);
         mission.UpdatedAt = _timeProvider.GetUtcNow();
-        await _repository.SaveMissionAsync(mission, cancellationToken);
+        if (!await TrySaveProcessingMissionAsync(mission, cancellationToken))
+        {
+            return;
+        }
 
         if (mission.PullRequest is not null)
         {
@@ -723,7 +866,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
     private async Task MarkMissionFailedAsync(Guid missionId, Exception exception, CancellationToken cancellationToken)
     {
         var mission = await _repository.GetMissionAsync(missionId, cancellationToken);
-        if (mission is null)
+        if (mission is null || mission.IsArchived || mission.Status == MissionStatus.Cancelled)
         {
             return;
         }
@@ -737,35 +880,68 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
         await PublishProgressAsync(mission.Id, AgentRole.Manager, "mission-failed", exception.Message, null, cancellationToken);
     }
 
-    private static List<MissionStep> BuildSteps(IReadOnlyList<string> acceptanceCriteria)
+    private async Task<bool> TrySaveProcessingMissionAsync(Mission mission, CancellationToken cancellationToken)
+    {
+        if (!await CanContinueProcessingMissionAsync(mission, cancellationToken))
+        {
+            return false;
+        }
+
+        await _repository.SaveMissionAsync(mission, cancellationToken);
+        return true;
+    }
+
+    private async Task<bool> CanContinueProcessingMissionAsync(Mission mission, CancellationToken cancellationToken)
+    {
+        var latest = await _repository.GetMissionAsync(mission.Id, cancellationToken);
+        if (latest is null)
+        {
+            return false;
+        }
+
+        if (!latest.IsArchived && latest.Status != MissionStatus.Cancelled)
+        {
+            return true;
+        }
+
+        mission.IsArchived = latest.IsArchived;
+        mission.ArchivedAt = latest.ArchivedAt;
+        mission.CancelledAt = latest.CancelledAt;
+        mission.CancelledReason = latest.CancelledReason;
+        mission.Status = latest.Status;
+        mission.CurrentPhase = latest.CurrentPhase;
+        return false;
+    }
+
+    private static AgentExecutionResult BuildArchivedExecutionResult()
+    {
+        return new AgentExecutionResult(
+            "Run archived by operator.",
+            [],
+            [],
+            new Dictionary<string, string>(),
+            null);
+    }
+
+    private static List<MissionStep> BuildSteps(SwarmTemplate template, IReadOnlyList<string> acceptanceCriteria)
     {
         var criteria = acceptanceCriteria.Count == 0 ? "No explicit acceptance criteria extracted." : string.Join(" | ", acceptanceCriteria);
-        var roles = new[]
-        {
-            AgentRole.Analyst,
-            AgentRole.WebDev,
-            AgentRole.Frontend,
-            AgentRole.Backend,
-            AgentRole.Tester,
-            AgentRole.PM,
-            AgentRole.Support
-        };
+        var roles = BuildSwarmAssignments(template).Select(item => item.Role).ToArray();
 
         var steps = new List<MissionStep>();
-        Guid? previous = null;
+        var stepIds = roles.ToDictionary(role => role, _ => Guid.NewGuid());
         for (var index = 0; index < roles.Length; index++)
         {
             var step = new MissionStep
             {
-                Id = Guid.NewGuid(),
+                Id = stepIds[roles[index]],
                 Title = $"{roles[index]} workstream",
                 Owner = roles[index],
                 Order = index + 1,
                 Summary = criteria,
-                Dependencies = previous is null ? [] : [previous.Value]
+                Dependencies = BuildDependencies(template, roles[index], stepIds)
             };
             steps.Add(step);
-            previous = step.Id;
         }
 
         return steps;
@@ -787,6 +963,12 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
 
     private static void FinalizeMissionIfResolved(Mission mission)
     {
+        if (mission.Status == MissionStatus.Cancelled)
+        {
+            mission.CurrentPhase = "Cancelled";
+            return;
+        }
+
         if (mission.PatchProposals.All(item => item.Status != PatchProposalStatus.PendingReview))
         {
             mission.Status = MissionStatus.Completed;
@@ -861,7 +1043,7 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
 
     private static string BuildSearchQuery(Mission mission)
     {
-        var builder = new StringBuilder(mission.Prompt);
+        var builder = new StringBuilder(GetMissionObjective(mission));
         if (!string.IsNullOrWhiteSpace(mission.SelectedRepository?.FullName))
         {
             builder.Append(' ').Append(mission.SelectedRepository.FullName);
@@ -889,4 +1071,159 @@ public sealed class MissionOrchestrator : BackgroundService, IOrchestrator
     {
         return value.Length > limit ? value[..limit] : value;
     }
+
+    private static string GetMissionObjective(Mission mission)
+    {
+        return string.IsNullOrWhiteSpace(mission.Objective) ? mission.Prompt : mission.Objective;
+    }
+
+    private static IReadOnlyList<SwarmAssignment> BuildSwarmAssignments(SwarmTemplate template)
+    {
+        return template switch
+        {
+            SwarmTemplate.Sequential =>
+            [
+                new SwarmAssignment(AgentRole.Analyst, AgentRole.Manager),
+                new SwarmAssignment(AgentRole.WebDev, AgentRole.Analyst),
+                new SwarmAssignment(AgentRole.Frontend, AgentRole.WebDev),
+                new SwarmAssignment(AgentRole.Backend, AgentRole.Frontend),
+                new SwarmAssignment(AgentRole.Tester, AgentRole.Backend),
+                new SwarmAssignment(AgentRole.PM, AgentRole.Tester),
+                new SwarmAssignment(AgentRole.Support, AgentRole.PM)
+            ],
+            SwarmTemplate.ParallelReview =>
+            [
+                new SwarmAssignment(AgentRole.Analyst, AgentRole.Manager),
+                new SwarmAssignment(AgentRole.WebDev, AgentRole.Manager),
+                new SwarmAssignment(AgentRole.Frontend, AgentRole.WebDev),
+                new SwarmAssignment(AgentRole.Backend, AgentRole.WebDev),
+                new SwarmAssignment(AgentRole.Tester, AgentRole.Manager),
+                new SwarmAssignment(AgentRole.PM, AgentRole.Tester),
+                new SwarmAssignment(AgentRole.Support, AgentRole.PM)
+            ],
+            _ =>
+            [
+                new SwarmAssignment(AgentRole.Analyst, AgentRole.Manager),
+                new SwarmAssignment(AgentRole.WebDev, AgentRole.Manager),
+                new SwarmAssignment(AgentRole.Frontend, AgentRole.WebDev),
+                new SwarmAssignment(AgentRole.Backend, AgentRole.WebDev),
+                new SwarmAssignment(AgentRole.Tester, AgentRole.Manager),
+                new SwarmAssignment(AgentRole.PM, AgentRole.Manager),
+                new SwarmAssignment(AgentRole.Support, AgentRole.Manager)
+            ]
+        };
+    }
+
+    private static List<Guid> BuildDependencies(SwarmTemplate template, AgentRole role, IReadOnlyDictionary<AgentRole, Guid> stepIds)
+    {
+        if (template == SwarmTemplate.Sequential)
+        {
+            var roles = BuildSwarmAssignments(template).Select(item => item.Role).ToArray();
+            var index = Array.IndexOf(roles, role);
+            return index <= 0 ? [] : [stepIds[roles[index - 1]]];
+        }
+
+        return role switch
+        {
+            AgentRole.Analyst => [],
+            AgentRole.WebDev => [stepIds[AgentRole.Analyst]],
+            AgentRole.Frontend => [stepIds[AgentRole.WebDev]],
+            AgentRole.Backend => [stepIds[AgentRole.WebDev]],
+            AgentRole.Tester => [stepIds[AgentRole.Frontend], stepIds[AgentRole.Backend]],
+            AgentRole.PM => [stepIds[AgentRole.Tester]],
+            AgentRole.Support => [stepIds[AgentRole.PM]],
+            _ => []
+        };
+    }
+
+    private void ValidateRunCapabilities(AgentRuntimeCatalog runtimeCatalog, IReadOnlyList<SwarmAssignment> swarmPlan)
+    {
+        var toolIndex = runtimeCatalog.Tools.ToDictionary(item => item.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var assignment in swarmPlan)
+        {
+            if (!_executors.ContainsKey(assignment.Role))
+            {
+                throw new InvalidOperationException($"No executor registered for role '{assignment.Role}'.");
+            }
+
+            var policy = runtimeCatalog.Policies.FirstOrDefault(item => item.Role == assignment.Role);
+            if (policy is null)
+            {
+                throw new InvalidOperationException($"Runtime policy is missing for role '{assignment.Role}'.");
+            }
+
+            if (policy.ExecutionMode != AgentExecutionMode.ToolLoop)
+            {
+                continue;
+            }
+
+            if (policy.AllowedTools.Count == 0)
+            {
+                throw new InvalidOperationException($"{assignment.Role} is configured for ToolLoop but has no allowed tools.");
+            }
+
+            var missingTools = policy.AllowedTools
+                .Where(toolName => !toolIndex.TryGetValue(toolName, out var tool) || !tool.Enabled)
+                .ToList();
+            if (missingTools.Count > 0)
+            {
+                throw new InvalidOperationException($"{assignment.Role} requires unavailable tools: {string.Join(", ", missingTools)}.");
+            }
+
+            if (assignment.Role is AgentRole.Frontend or AgentRole.Backend && policy.WritableRoots.Count == 0)
+            {
+                throw new InvalidOperationException($"{assignment.Role} is configured for ToolLoop but has no writable roots.");
+            }
+        }
+    }
+
+    private static void EnsureDelegationAllowed(AgentRuntimeCatalog runtimeCatalog, AgentRole fromRole, AgentRole toRole)
+    {
+        var policy = runtimeCatalog.Policies.FirstOrDefault(item => item.Role == fromRole);
+        if (policy is null)
+        {
+            throw new InvalidOperationException($"Delegation policy is missing for role '{fromRole}'.");
+        }
+
+        if (!policy.AllowedDelegates.Contains(toRole))
+        {
+            throw new InvalidOperationException($"{fromRole} is not allowed to delegate to {toRole}.");
+        }
+    }
+
+    private static string? BuildPreviousSummary(AgentRole role, IReadOnlyDictionary<AgentRole, AgentExecutionResult> results)
+    {
+        return role switch
+        {
+            AgentRole.Analyst => null,
+            AgentRole.WebDev => results.TryGetValue(AgentRole.Analyst, out var analyst) ? analyst.Summary : null,
+            AgentRole.Frontend or AgentRole.Backend => results.TryGetValue(AgentRole.WebDev, out var webDev) ? webDev.Summary : null,
+            AgentRole.Tester => $"Frontend patch count: {GetPatchCount(results, AgentRole.Frontend)}, Backend patch count: {GetPatchCount(results, AgentRole.Backend)}",
+            AgentRole.PM => results.TryGetValue(AgentRole.Tester, out var tester) ? tester.Summary : null,
+            AgentRole.Support => results.TryGetValue(AgentRole.PM, out var pm) ? pm.Summary : null,
+            _ => null
+        };
+    }
+
+    private static int GetPatchCount(IReadOnlyDictionary<AgentRole, AgentExecutionResult> results, AgentRole role)
+    {
+        return results.TryGetValue(role, out var result) ? result.ProposedPatches.Count : 0;
+    }
+
+    private static string GetPhaseForRole(AgentRole role)
+    {
+        return role switch
+        {
+            AgentRole.Analyst => "Scope analysis",
+            AgentRole.WebDev => "Architecture planning",
+            AgentRole.Frontend => "Frontend implementation",
+            AgentRole.Backend => "Backend implementation",
+            AgentRole.Tester => "Validation",
+            AgentRole.PM => "Operator summary",
+            AgentRole.Support => "Operator handoff",
+            _ => "Running"
+        };
+    }
+
+    private sealed record SwarmAssignment(AgentRole Role, AgentRole? DelegatedBy);
 }

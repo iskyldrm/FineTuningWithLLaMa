@@ -1698,7 +1698,7 @@ public sealed partial class GitWorkspaceToolset : IWorkspaceToolset
 
 public sealed class UnifiedDiffPatchPolicy : IPatchPolicy
 {
-    private static readonly string[] BlockedFragments = ["/.git/", "\\.git\\", ".git", ".env", "node_modules", ".nuget", ".dotnet-home", "/bin/", "/obj/"];
+    private static readonly string[] BlockedFragments = ["/.git/", "\\.git\\", ".git", ".env", "node_modules", ".nuget", ".dotnet-home", "/bin/", "/obj/", ".gitmodules", "project-workspaces", "workspace-data"];
 
     public PatchPolicyDecision Evaluate(PatchProposal proposal)
     {
@@ -1722,9 +1722,33 @@ public sealed class UnifiedDiffPatchPolicy : IPatchPolicy
             return new PatchPolicyDecision(false, "Patch paths must stay inside the workspace.");
         }
 
+        if (proposal.Diff.Contains("160000", StringComparison.Ordinal) || proposal.Diff.Contains("Subproject commit", StringComparison.OrdinalIgnoreCase))
+        {
+            return new PatchPolicyDecision(false, "Patch attempts to add or delete a gitlink/submodule entry.");
+        }
+
+        if (proposal.TargetPaths.Any(path => string.IsNullOrWhiteSpace(path) || string.Equals(path, ".", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new PatchPolicyDecision(false, "Patch attempts to modify the workspace root.");
+        }
+
+        if (proposal.Diff.Contains("deleted file mode 160000", StringComparison.OrdinalIgnoreCase))
+        {
+            return new PatchPolicyDecision(false, "Patch attempts to delete a gitlink/submodule.");
+        }
+
         if (proposal.TargetPaths.Any(path => BlockedFragments.Any(fragment => path.Contains(fragment, StringComparison.OrdinalIgnoreCase))))
         {
             return new PatchPolicyDecision(false, "Patch targets a protected path.");
+        }
+
+        var diffHeaders = proposal.Diff.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Count(line => line.StartsWith("diff --git ", StringComparison.Ordinal));
+        var hunkCount = proposal.Diff.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Count(line => line.StartsWith("@@ ", StringComparison.Ordinal) || string.Equals(line, "@@", StringComparison.Ordinal));
+        if (diffHeaders > 0 && hunkCount == 0)
+        {
+            return new PatchPolicyDecision(false, "Patch contains metadata churn without any real file edits.");
         }
 
         return new PatchPolicyDecision(true, "Patch accepted by sandbox policy.");

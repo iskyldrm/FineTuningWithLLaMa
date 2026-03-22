@@ -1,11 +1,14 @@
 export type AgentRole = 'Manager' | 'Analyst' | 'WebDev' | 'Frontend' | 'Backend' | 'Tester' | 'PM' | 'Support'
 export type AgentRunStatus = 'Idle' | 'Thinking' | 'Delegating' | 'Coding' | 'Reviewing' | 'Waiting' | 'Completed' | 'Error'
-export type MissionStatus = 'Draft' | 'Queued' | 'Running' | 'AwaitingPatchApproval' | 'Completed' | 'Failed'
+export type MissionStatus = 'Draft' | 'Queued' | 'Running' | 'AwaitingPatchApproval' | 'Completed' | 'Failed' | 'Cancelled'
 export type MissionStepStatus = 'Pending' | 'InProgress' | 'Completed' | 'Blocked'
 export type PatchProposalStatus = 'PendingReview' | 'Approved' | 'Rejected' | 'Applied' | 'Failed'
 export type AgentExecutionMode = 'StructuredPrompt' | 'ToolLoop'
 export type AgentToolType = 'ListFiles' | 'ReadFile' | 'WriteFile' | 'SearchCode' | 'RunTerminal' | 'GitStatus' | 'GitDiff' | 'GitCommit' | 'GitPush' | 'CustomCommand'
-export type AppRoute = 'dashboard' | 'agents' | 'workflows' | 'execution'
+export type SwarmTemplate = 'Sequential' | 'Hierarchical' | 'ParallelReview'
+export type AppRoute = 'overview' | 'tasks' | 'swarms' | 'agents' | 'permissions' | 'tools' | 'chats'
+
+export const agentRoles: AgentRole[] = ['Manager', 'Analyst', 'WebDev', 'Frontend', 'Backend', 'Tester', 'PM', 'Support']
 
 export interface RepositoryRef {
   owner: string
@@ -168,6 +171,7 @@ export interface AgentRolePolicy {
   role: AgentRole
   executionMode: AgentExecutionMode
   allowedTools: string[]
+  allowedDelegates: AgentRole[]
   writableRoots: string[]
   maxSteps: number
 }
@@ -182,10 +186,16 @@ export interface Mission {
   id: string
   title: string
   prompt: string
+  objective: string
+  swarmTemplate: SwarmTemplate
   status: MissionStatus
   createdAt: string
   updatedAt: string
   currentPhase?: string | null
+  isArchived: boolean
+  archivedAt?: string | null
+  cancelledAt?: string | null
+  cancelledReason?: string | null
   selectedRepository?: RepositoryRef | null
   selectedSprint?: SprintRef | null
   selectedWorkItem?: GitHubBoardItemRef | null
@@ -208,6 +218,19 @@ export interface DashboardSnapshot {
   logicalQueueDepth: number
   chatModel: string
   physicalWorkerCount: number
+}
+
+export interface OverviewSystemSnapshot {
+  logicalQueueDepth: number
+  chatModel: string
+  physicalWorkerCount: number
+}
+
+export interface OverviewSnapshot {
+  activeRun?: Mission | null
+  recentRuns: Mission[]
+  system: OverviewSystemSnapshot
+  agents: AgentSnapshot[]
 }
 
 export interface OllamaModelInfo {
@@ -247,12 +270,13 @@ export interface ChatExchangeResult {
   assistantMessage: ChatMessage
 }
 
-export interface CreateMissionRequest {
+export interface CreateRunRequest {
   title: string
-  prompt: string
+  objective: string
   selectedRepository?: RepositoryRef | null
   selectedSprint?: SprintRef | null
   selectedWorkItem?: GitHubBoardItemRef | null
+  swarmTemplate: SwarmTemplate
   autoCreatePullRequest?: boolean
 }
 

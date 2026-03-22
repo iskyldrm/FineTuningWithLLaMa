@@ -104,17 +104,66 @@ public sealed class PostgresMissionRepository : IMissionRepository
         return raw is null ? null : JsonSerializer.Deserialize<Mission>(raw, JsonDefaults.Web);
     }
 
-    public async Task<Mission?> GetLatestMissionAsync(CancellationToken cancellationToken)
+    public async Task<Mission?> GetActiveMissionAsync(CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
 
         await using var connection = new NpgsqlConnection(_options.PostgresConnectionString);
         await connection.OpenAsync(cancellationToken);
 
-        const string sql = "select data::text from missions order by updated_at desc limit 1;";
+        const string sql = "select data::text from missions order by updated_at desc;";
         await using var command = new NpgsqlCommand(sql, connection);
-        var raw = await command.ExecuteScalarAsync(cancellationToken) as string;
-        return raw is null ? null : JsonSerializer.Deserialize<Mission>(raw, JsonDefaults.Web);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var mission = DeserializeMission(reader.GetString(0));
+            if (mission is null || mission.IsArchived)
+            {
+                continue;
+            }
+
+            if (mission.Status is MissionStatus.Queued or MissionStatus.Running or MissionStatus.AwaitingPatchApproval)
+            {
+                return mission;
+            }
+        }
+
+        return null;
+    }
+
+    public async Task<IReadOnlyList<Mission>> ListMissionsAsync(int limit, bool includeArchived, CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        await using var connection = new NpgsqlConnection(_options.PostgresConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        const string sql = "select data::text from missions order by updated_at desc;";
+        await using var command = new NpgsqlCommand(sql, connection);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var items = new List<Mission>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var mission = DeserializeMission(reader.GetString(0));
+            if (mission is null)
+            {
+                continue;
+            }
+
+            if (!includeArchived && mission.IsArchived)
+            {
+                continue;
+            }
+
+            items.Add(mission);
+            if (items.Count >= limit)
+            {
+                break;
+            }
+        }
+
+        return items;
     }
 
     public async Task<IReadOnlyList<ActivityEvent>> GetActivitiesAsync(Guid missionId, CancellationToken cancellationToken)
@@ -173,8 +222,7 @@ public sealed class PostgresMissionRepository : IMissionRepository
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            var raw = reader.GetString(0);
-            var mission = JsonSerializer.Deserialize<Mission>(raw, JsonDefaults.Web);
+            var mission = DeserializeMission(reader.GetString(0));
             var proposal = mission?.PatchProposals.FirstOrDefault(item => item.Id == proposalId);
             if (mission is not null && proposal is not null)
             {
@@ -183,6 +231,11 @@ public sealed class PostgresMissionRepository : IMissionRepository
         }
 
         return null;
+    }
+
+    private static Mission? DeserializeMission(string raw)
+    {
+        return JsonSerializer.Deserialize<Mission>(raw, JsonDefaults.Web);
     }
 }
 

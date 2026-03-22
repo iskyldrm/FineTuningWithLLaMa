@@ -41,7 +41,7 @@ public sealed class WorkspaceOptions
 
     public string RootPath { get; set; } = "..\\..\\..\\..";
 
-    public string RepositoriesRootPath { get; set; } = "..\\..\\..\\..\\project-workspaces";
+    public string RepositoriesRootPath { get; set; } = "..\\..\\..\\..\\..\\workspace-data\\repositories";
 
     public string KnowledgeEntryPoint { get; set; } = "APEX.md";
 

@@ -20,15 +20,25 @@ public interface IOrchestrator
 
     int QueueDepth { get; }
 
+    Task<Mission> CreateRunAsync(CreateRunRequest request, CancellationToken cancellationToken);
+
     Task<Mission> CreateMissionAsync(CreateMissionRequest request, CancellationToken cancellationToken);
 
     Task<Mission?> GetMissionAsync(Guid missionId, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<Mission>> ListRunsAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ActivityEvent>> GetActivitiesAsync(Guid missionId, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ProgressLog>> GetProgressLogsAsync(Guid missionId, CancellationToken cancellationToken);
 
+    Task<OverviewSnapshot> GetOverviewAsync(CancellationToken cancellationToken);
+
     Task<DashboardSnapshot> GetDashboardAsync(CancellationToken cancellationToken);
+
+    Task<Mission?> ArchiveRunAsync(Guid missionId, CancellationToken cancellationToken);
+
+    Task<Mission?> CancelRunAsync(Guid missionId, CancellationToken cancellationToken);
 
     Task<PatchProposal?> ApprovePatchAsync(Guid proposalId, PatchDecisionRequest request, CancellationToken cancellationToken);
 
@@ -120,7 +130,9 @@ public interface IMissionRepository
 
     Task<Mission?> GetMissionAsync(Guid missionId, CancellationToken cancellationToken);
 
-    Task<Mission?> GetLatestMissionAsync(CancellationToken cancellationToken);
+    Task<Mission?> GetActiveMissionAsync(CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<Mission>> ListMissionsAsync(int limit, bool includeArchived, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ActivityEvent>> GetActivitiesAsync(Guid missionId, CancellationToken cancellationToken);
 

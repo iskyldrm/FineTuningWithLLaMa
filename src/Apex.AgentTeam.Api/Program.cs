@@ -66,8 +66,11 @@ var app = builder.Build();
 
 app.UseCors();
 
-app.MapGet("/", () => Results.Redirect("/api/dashboard"));
+app.MapGet("/", () => Results.Redirect("/api/overview"));
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
+
+app.MapGet("/api/overview", async (IOrchestrator orchestrator, CancellationToken cancellationToken) =>
+    Results.Ok(await orchestrator.GetOverviewAsync(cancellationToken)));
 
 app.MapGet("/api/dashboard", async (IOrchestrator orchestrator, CancellationToken cancellationToken) =>
     Results.Ok(await orchestrator.GetDashboardAsync(cancellationToken)));
@@ -95,6 +98,39 @@ app.MapPost("/api/agent-runtime/tools", async (UpsertAgentToolRequest request, I
 
 app.MapPut("/api/agent-runtime/policies/{role}", async (AgentRole role, UpdateAgentRolePolicyRequest request, IAgentRuntimeCatalogStore catalogStore, CancellationToken cancellationToken) =>
     Results.Ok(await catalogStore.UpdatePolicyAsync(role, request, cancellationToken)));
+
+app.MapGet("/api/runs", async (IOrchestrator orchestrator, CancellationToken cancellationToken) =>
+    Results.Ok(await orchestrator.ListRunsAsync(cancellationToken)));
+
+app.MapGet("/api/runs/{runId:guid}", async (Guid runId, IOrchestrator orchestrator, CancellationToken cancellationToken) =>
+{
+    var run = await orchestrator.GetMissionAsync(runId, cancellationToken);
+    return run is null ? Results.NotFound() : Results.Ok(run);
+});
+
+app.MapGet("/api/runs/{runId:guid}/activities", async (Guid runId, IOrchestrator orchestrator, CancellationToken cancellationToken) =>
+    Results.Ok(await orchestrator.GetActivitiesAsync(runId, cancellationToken)));
+
+app.MapGet("/api/runs/{runId:guid}/progress", async (Guid runId, IOrchestrator orchestrator, CancellationToken cancellationToken) =>
+    Results.Ok(await orchestrator.GetProgressLogsAsync(runId, cancellationToken)));
+
+app.MapPost("/api/runs", async (CreateRunRequest request, IOrchestrator orchestrator, CancellationToken cancellationToken) =>
+{
+    var run = await orchestrator.CreateRunAsync(request, cancellationToken);
+    return Results.Created($"/api/runs/{run.Id}", run);
+});
+
+app.MapPost("/api/runs/{runId:guid}/archive", async (Guid runId, IOrchestrator orchestrator, CancellationToken cancellationToken) =>
+{
+    var run = await orchestrator.ArchiveRunAsync(runId, cancellationToken);
+    return run is null ? Results.NotFound() : Results.Ok(run);
+});
+
+app.MapPost("/api/runs/{runId:guid}/cancel", async (Guid runId, IOrchestrator orchestrator, CancellationToken cancellationToken) =>
+{
+    var run = await orchestrator.CancelRunAsync(runId, cancellationToken);
+    return run is null ? Results.NotFound() : Results.Ok(run);
+});
 
 app.MapGet("/api/missions/{missionId:guid}", async (Guid missionId, IOrchestrator orchestrator, CancellationToken cancellationToken) =>
 {

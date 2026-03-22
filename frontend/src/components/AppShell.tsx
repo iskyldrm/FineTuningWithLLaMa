@@ -1,20 +1,27 @@
+import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import type { AppRoute } from '../types'
 import type { ApexConsoleState } from '../app/useApexConsole'
 
-const navItems: Array<{ route: AppRoute; label: string; description: string; icon: string }> = [
-  { route: 'dashboard', label: 'Dashboard', description: 'Neural workspace', icon: 'dashboard' },
-  { route: 'agents', label: 'Agents', description: 'Registry ve constructor', icon: 'smart_toy' },
-  { route: 'workflows', label: 'Workflows', description: 'Node orchestration', icon: 'account_tree' },
-  { route: 'execution', label: 'Execution', description: 'Live pulse terminal', icon: 'terminal' },
+const navItems: Array<{ route: AppRoute; label: string; icon: string }> = [
+  { route: 'overview', label: 'Overview', icon: 'home' },
+  { route: 'tasks', label: 'Tasks', icon: 'add_task' },
+  { route: 'swarms', label: 'Swarms', icon: 'hub' },
+  { route: 'agents', label: 'Agents', icon: 'smart_toy' },
+  { route: 'permissions', label: 'Permissions', icon: 'shield' },
+  { route: 'tools', label: 'Tools', icon: 'build' },
+  { route: 'chats', label: 'Chats', icon: 'chat_bubble' },
 ]
 
-const routeMeta: Record<AppRoute, { title: string; search: string }> = {
-  dashboard: { title: 'Neural Workspace', search: 'Search substrate...' },
-  agents: { title: 'Agent Orchestration', search: 'Global node search...' },
-  workflows: { title: 'Workflow Orchestration', search: 'Search workflow graph...' },
-  execution: { title: 'Execution Pulse', search: 'Search execution history...' },
+const routeMeta: Record<AppRoute, { title: string; description: string }> = {
+  overview: { title: 'Overview', description: 'Active run summary, recent runs, and system state.' },
+  tasks: { title: 'Tasks', description: 'Create direct tasks, pick a repo, or dispatch a board item.' },
+  swarms: { title: 'Swarms', description: 'Live run detail, delegation flow, and patch review.' },
+  agents: { title: 'Agents', description: 'Registry, availability, and current role capabilities.' },
+  permissions: { title: 'Permissions', description: 'Role execution policy and delegation boundaries.' },
+  tools: { title: 'Tools', description: 'Tool registry and usable-role visibility.' },
+  chats: { title: 'Chats', description: 'Dedicated assistant conversations outside run execution.' },
 }
 
 type AppShellProps = {
@@ -22,95 +29,95 @@ type AppShellProps = {
   children: ReactNode
 }
 
+function normalizeRoute(pathname: string): AppRoute {
+  const route = pathname.replace(/^\/+/, '').split('/')[0]
+  if (route === 'dashboard' || route === 'home' || route === 'monitoring') {
+    return 'overview'
+  }
+
+  if (route === 'workflows' || route === 'execution') {
+    return 'swarms'
+  }
+
+  return (routeMeta[route as AppRoute] ? route : 'overview') as AppRoute
+}
+
 export function AppShell({ state, children }: AppShellProps) {
   const location = useLocation()
-  const currentRoute = ((location.pathname.replace('/', '') || 'dashboard') as AppRoute)
-  const meta = routeMeta[currentRoute] ?? routeMeta.dashboard
+  const currentRoute = normalizeRoute(location.pathname)
+  const meta = routeMeta[currentRoute]
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [location.pathname])
 
   return (
-    <div className="ns-shell">
-      <aside className="ns-sidebar">
-        <div className="ns-brand">
-          <div className="ns-brand__mark">
-            <span className="material-symbols-outlined">hub</span>
-          </div>
-          <div>
-            <h1>APEX Neural Substrate</h1>
-            <p>Quantum Terminal v3.0</p>
+    <div className={`shell${sidebarCollapsed ? ' is-collapsed' : ''}${mobileNavOpen ? ' is-mobile-open' : ''}`}>
+      <button type="button" className="shell-backdrop" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />
+
+      <aside className="shell-sidebar">
+        <div className="shell-brand">
+          <div className="shell-brand__mark">A</div>
+          <div className="shell-brand__copy">
+            <strong>Apex Operator</strong>
+            <span>Swarm control</span>
           </div>
         </div>
 
-        <nav className="ns-sidebar__nav">
+        <nav className="shell-nav" aria-label="Primary">
           {navItems.map((item) => (
-            <NavLink
-              key={item.route}
-              to={`/${item.route}`}
-              className={({ isActive }) => `ns-nav ${isActive ? 'is-active' : ''}`}
-            >
+            <NavLink key={item.route} to={`/${item.route}`} className={({ isActive }) => `shell-nav__item${isActive ? ' is-active' : ''}`}>
               <span className="material-symbols-outlined">{item.icon}</span>
-              <span className="ns-nav__copy">
-                <strong>{item.label}</strong>
-                <small>{item.description}</small>
-              </span>
+              <span>{item.label}</span>
             </NavLink>
           ))}
         </nav>
 
-        <div className="ns-sidebar__cta">
-          <NavLink to="/agents" className="ns-button ns-button--primary">
-            <span className="material-symbols-outlined">rocket_launch</span>
-            Deploy Agent
-          </NavLink>
-        </div>
-
-        <div className="ns-sidebar__footer">
-          <button type="button" className="ns-footer-link">
-            <span className="material-symbols-outlined">database</span>
-            <span>System Logs</span>
-          </button>
-          <button type="button" className="ns-footer-link">
-            <span className="material-symbols-outlined">settings</span>
-            <span>Settings</span>
-          </button>
+        <div className="shell-sidebar__footer">
+          <div className="shell-context">
+            <span>Selected repo</span>
+            <strong>{state.selectedRepository?.fullName ?? state.currentRun.selectedRepository?.fullName ?? 'No repository'}</strong>
+          </div>
+          <div className="shell-inline-stats">
+            <span>{state.connected ? 'Live' : 'Polling'}</span>
+            <span>Queue {state.overview.system.logicalQueueDepth}</span>
+          </div>
         </div>
       </aside>
 
-      <section className="ns-mainframe">
-        <header className="ns-topbar">
-          <div className="ns-topbar__left">
-            <label className="ns-search">
-              <span className="material-symbols-outlined">search</span>
-              <input type="text" placeholder={meta.search} />
-            </label>
-            <nav className="ns-health-tabs" aria-label="System tabs">
-              <button type="button" className="is-active">Health</button>
-              <button type="button">Latency</button>
-              <button type="button">Uptime</button>
-            </nav>
+      <section className="shell-main">
+        <header className="shell-topbar">
+          <div className="shell-topbar__left">
+            <button type="button" className="shell-icon-button shell-mobile-toggle" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}>
+              <span className="material-symbols-outlined">menu</span>
+            </button>
+            <button
+              type="button"
+              className="shell-icon-button shell-desktop-toggle"
+              aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+              onClick={() => setSidebarCollapsed((current) => !current)}
+            >
+              <span className="material-symbols-outlined">{sidebarCollapsed ? 'left_panel_open' : 'left_panel_close'}</span>
+            </button>
+            <div className="shell-heading">
+              <h1>{meta.title}</h1>
+              <p>{meta.description}</p>
+            </div>
           </div>
 
-          <div className="ns-topbar__right">
-            <div className="ns-topbar__badge">
-              <span>Queue</span>
-              <strong>{state.dashboard.logicalQueueDepth}</strong>
-            </div>
-            <button type="button" className="ns-icon-button" aria-label="Notifications">
-              <span className="material-symbols-outlined">notifications</span>
-            </button>
-            <button type="button" className="ns-icon-button" aria-label="Controls">
-              <span className="material-symbols-outlined">settings_input_component</span>
-            </button>
-            <div className="ns-avatar-card">
-              <div>
-                <strong>{meta.title}</strong>
-                <small>{state.selectedRepository?.fullName ?? state.selectedModel ?? 'Local control mesh'}</small>
-              </div>
-              <div className="ns-avatar">A</div>
-            </div>
+          <div className="shell-topbar__right">
+            <div className="shell-pill">{state.connected ? 'Connected' : 'Offline polling'}</div>
+            <div className="shell-pill">{state.overview.agents.length} agents</div>
+            <div className="shell-pill">{state.currentRun.swarmTemplate}</div>
           </div>
         </header>
 
-        <div className="ns-page-frame">{children}</div>
+        <main className="shell-content">
+          {state.error ? <div className="global-banner">{state.error}</div> : null}
+          {children}
+        </main>
       </section>
     </div>
   )

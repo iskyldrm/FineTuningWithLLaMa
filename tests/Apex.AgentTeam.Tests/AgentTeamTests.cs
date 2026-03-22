@@ -4,6 +4,7 @@ using Apex.AgentTeam.Api.Options;
 using Apex.AgentTeam.Api.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Reflection;
 
 namespace Apex.AgentTeam.Tests;
 
@@ -59,7 +60,32 @@ public sealed class AgentTeamTests
     }
 
     [Fact]
-    public async Task Orchestrator_CreateMission_QueuesAndPersistsMission_WithRepoContext()
+    public void PatchPolicy_BlocksGitlinkDeletion()
+    {
+        var policy = new UnifiedDiffPatchPolicy();
+        var proposal = new PatchProposal
+        {
+            AuthorRole = AgentRole.Backend,
+            TargetPaths = ["workspace-data/repositories/demo"],
+            Diff = """
+                diff --git a/workspace-data/repositories/demo b/workspace-data/repositories/demo
+                deleted file mode 160000
+                index e69de29..0000000
+                --- a/workspace-data/repositories/demo
+                +++ /dev/null
+                """
+        };
+
+        var decision = policy.Evaluate(proposal);
+
+        Assert.False(decision.IsAllowed);
+        Assert.True(
+            decision.Reason.Contains("gitlink", StringComparison.OrdinalIgnoreCase)
+            || decision.Reason.Contains("protected path", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Orchestrator_CreateRun_QueuesAndPersistsRun_WithRepoContext()
     {
         var repository = new InMemoryMissionRepository();
         var progressStore = new InMemoryProgressStore();
@@ -71,6 +97,7 @@ public sealed class AgentTeamTests
             new NullMemoryStore(),
             new NullWorkspaceToolset(),
             new NullGitHubCatalog(),
+            new InMemoryRuntimeCatalogStore(),
             new UnifiedDiffPatchPolicy(),
             new NullTaskSink(),
             [new StructuredAgentExecutor(AgentRole.Analyst, new FakeModelGateway("analysis"), TimeProvider.System)],
@@ -78,30 +105,84 @@ public sealed class AgentTeamTests
             Options.Create(new ModelOptions()),
             NullLogger<MissionOrchestrator>.Instance);
 
-        var mission = await orchestrator.CreateMissionAsync(new CreateMissionRequest
+        var mission = await orchestrator.CreateRunAsync(new CreateRunRequest
         {
             Title = "Queue test",
-            Prompt = "Queue mission",
+            Objective = "Queue mission",
             SelectedRepository = new RepositoryRef { Owner = "local", Name = "apex", FullName = "local/apex", DefaultBranch = "main" },
-            SelectedSprint = new SprintRef { Id = "7", Number = 7, Title = "Sprint 7", State = "open" }
+            SelectedSprint = new SprintRef { Id = "7", Number = 7, Title = "Sprint 7", State = "open" },
+            SwarmTemplate = SwarmTemplate.Hierarchical
         }, CancellationToken.None);
 
         Assert.Equal(MissionStatus.Queued, mission.Status);
         Assert.Equal(1, orchestrator.QueueDepth);
         Assert.Equal("local/apex", mission.SelectedRepository?.FullName);
         Assert.Equal("Sprint 7", mission.SelectedSprint?.Title);
+        Assert.Equal("Queue mission", mission.Objective);
         Assert.Contains(await progressStore.GetByMissionAsync(mission.Id, 10, CancellationToken.None), item => item.Stage == "queued");
     }
 
     [Fact]
-    public async Task AdaptiveExecutor_ToolLoopCreatesAlreadyAppliedPatch()
+    public async Task Overview_ReturnsOnlyActiveRun_AndKeepsCompletedRunInHistory()
+    {
+        var repository = new InMemoryMissionRepository();
+        var now = DateTimeOffset.UtcNow;
+        await repository.SaveMissionAsync(new Mission
+        {
+            Id = Guid.NewGuid(),
+            Title = "Completed",
+            Objective = "done",
+            Prompt = "done",
+            Status = MissionStatus.Completed,
+            CreatedAt = now.AddMinutes(-5),
+            UpdatedAt = now.AddMinutes(-2),
+            Agents = BuildMission().Agents
+        }, CancellationToken.None);
+        var active = new Mission
+        {
+            Id = Guid.NewGuid(),
+            Title = "Running",
+            Objective = "live",
+            Prompt = "live",
+            Status = MissionStatus.Running,
+            CreatedAt = now.AddMinutes(-1),
+            UpdatedAt = now,
+            Agents = BuildMission().Agents
+        };
+        await repository.SaveMissionAsync(active, CancellationToken.None);
+
+        var orchestrator = new MissionOrchestrator(
+            repository,
+            new NullActivityStream(),
+            new InMemoryProgressStore(),
+            new NullProgressStream(),
+            new NullMemoryStore(),
+            new NullWorkspaceToolset(),
+            new NullGitHubCatalog(),
+            new InMemoryRuntimeCatalogStore(),
+            new UnifiedDiffPatchPolicy(),
+            new NullTaskSink(),
+            [new StructuredAgentExecutor(AgentRole.Analyst, new FakeModelGateway("analysis"), TimeProvider.System)],
+            TimeProvider.System,
+            Options.Create(new ModelOptions()),
+            NullLogger<MissionOrchestrator>.Instance);
+
+        var overview = await orchestrator.GetOverviewAsync(CancellationToken.None);
+
+        Assert.Equal(active.Id, overview.ActiveRun?.Id);
+        Assert.Contains(overview.RecentRuns, item => item.Title == "Completed");
+        Assert.DoesNotContain(overview.RecentRuns, item => item.Id == active.Id);
+    }
+
+    [Fact]
+    public async Task AdaptiveExecutor_ToolLoopNormalizesAliasArguments_AndCreatesAlreadyAppliedPatch()
     {
         var workspaceToolset = new LoopWorkspaceToolset();
         var catalogStore = new InMemoryRuntimeCatalogStore();
         var executor = new AdaptiveAgentExecutor(
             AgentRole.Frontend,
             new SequenceModelGateway([
-                "{\"kind\":\"tool\",\"toolName\":\"write_file\",\"arguments\":{\"path\":\"frontend/src/App.tsx\",\"content\":\"export default function App() { return <main>agent</main> }\"}}",
+                "{\"kind\":\"tool\",\"toolName\":\"write_file\",\"arguments\":{\"relativePath\":\"frontend/src/App.tsx\",\"content\":\"export default function App() { return <main>agent</main> }\"}}",
                 "{\"kind\":\"finish\",\"summary\":\"UI update completed.\"}"
             ]),
             workspaceToolset,
@@ -120,6 +201,70 @@ public sealed class AgentTeamTests
         Assert.Contains("UI update completed.", result.Summary, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ProcessMission_StopsPersisting_WhenRunIsArchivedMidExecution()
+    {
+        var repository = new InMemoryMissionRepository();
+        var progressStore = new InMemoryProgressStore();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var catalogStore = new InMemoryRuntimeCatalogStore();
+        var executors = new IAgentExecutor[]
+        {
+            new BlockingExecutor(started, resume),
+            new StructuredAgentExecutor(AgentRole.WebDev, new FakeModelGateway("webdev"), TimeProvider.System),
+            new StructuredAgentExecutor(AgentRole.Frontend, new FakeModelGateway("frontend"), TimeProvider.System),
+            new StructuredAgentExecutor(AgentRole.Backend, new FakeModelGateway("backend"), TimeProvider.System),
+            new StructuredAgentExecutor(AgentRole.Tester, new FakeModelGateway("tester"), TimeProvider.System),
+            new StructuredAgentExecutor(AgentRole.PM, new FakeModelGateway("pm"), TimeProvider.System),
+            new StructuredAgentExecutor(AgentRole.Support, new FakeModelGateway("support"), TimeProvider.System),
+        };
+
+        var orchestrator = new MissionOrchestrator(
+            repository,
+            new NullActivityStream(),
+            progressStore,
+            new NullProgressStream(),
+            new NullMemoryStore(),
+            new NullWorkspaceToolset(),
+            new NullGitHubCatalog(),
+            catalogStore,
+            new UnifiedDiffPatchPolicy(),
+            new NullTaskSink(),
+            executors,
+            TimeProvider.System,
+            Options.Create(new ModelOptions()),
+            NullLogger<MissionOrchestrator>.Instance);
+
+        var mission = await orchestrator.CreateRunAsync(new CreateRunRequest
+        {
+            Title = "Archive test",
+            Objective = "Archive while the analyst is running.",
+            SwarmTemplate = SwarmTemplate.Hierarchical
+        }, CancellationToken.None);
+
+        var processMethod = typeof(MissionOrchestrator).GetMethod("ProcessMissionAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(processMethod);
+
+        var processingTask = (Task)processMethod.Invoke(orchestrator, [mission.Id, CancellationToken.None])!;
+        await started.Task;
+
+        var archived = await orchestrator.ArchiveRunAsync(mission.Id, CancellationToken.None);
+        Assert.NotNull(archived);
+        resume.SetResult();
+
+        await processingTask;
+
+        var finalMission = await repository.GetMissionAsync(mission.Id, CancellationToken.None);
+        Assert.NotNull(finalMission);
+        Assert.True(finalMission!.IsArchived);
+        Assert.Equal(MissionStatus.Cancelled, finalMission.Status);
+        Assert.Equal("Archived", finalMission.CurrentPhase);
+
+        var overview = await orchestrator.GetOverviewAsync(CancellationToken.None);
+        Assert.Null(overview.ActiveRun);
+    }
+
     private static Mission BuildMission()
     {
         return new Mission
@@ -127,6 +272,8 @@ public sealed class AgentTeamTests
             Id = Guid.NewGuid(),
             Title = "Demo mission",
             Prompt = "Build a local-first agent dashboard with patch review.",
+            Objective = "Build a local-first agent dashboard with patch review.",
+            SwarmTemplate = SwarmTemplate.Hierarchical,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow,
             SelectedRepository = new RepositoryRef { Owner = "local", Name = "apex", FullName = "local/apex", DefaultBranch = "main" },
@@ -228,9 +375,22 @@ public sealed class AgentTeamTests
             return Task.FromResult(mission);
         }
 
-        public Task<Mission?> GetLatestMissionAsync(CancellationToken cancellationToken)
+        public Task<Mission?> GetActiveMissionAsync(CancellationToken cancellationToken)
         {
-            return Task.FromResult(_missions.Values.OrderByDescending(mission => mission.UpdatedAt).FirstOrDefault());
+            return Task.FromResult(_missions.Values
+                .Where(mission => !mission.IsArchived && mission.Status is MissionStatus.Queued or MissionStatus.Running or MissionStatus.AwaitingPatchApproval)
+                .OrderByDescending(mission => mission.UpdatedAt)
+                .FirstOrDefault());
+        }
+
+        public Task<IReadOnlyList<Mission>> ListMissionsAsync(int limit, bool includeArchived, CancellationToken cancellationToken)
+        {
+            var items = _missions.Values
+                .Where(mission => includeArchived || !mission.IsArchived)
+                .OrderByDescending(mission => mission.UpdatedAt)
+                .Take(limit)
+                .ToList();
+            return Task.FromResult<IReadOnlyList<Mission>>(items);
         }
 
         public Task<IReadOnlyList<ActivityEvent>> GetActivitiesAsync(Guid missionId, CancellationToken cancellationToken)
@@ -471,6 +631,27 @@ public sealed class AgentTeamTests
         }
     }
 
+    private sealed class BlockingExecutor : IAgentExecutor
+    {
+        private readonly TaskCompletionSource _started;
+        private readonly TaskCompletionSource _resume;
+
+        public BlockingExecutor(TaskCompletionSource started, TaskCompletionSource resume)
+        {
+            _started = started;
+            _resume = resume;
+        }
+
+        public AgentRole Role => AgentRole.Analyst;
+
+        public async Task<AgentExecutionResult> ExecuteAsync(AgentExecutionContext context, CancellationToken cancellationToken)
+        {
+            _started.TrySetResult();
+            await _resume.Task.WaitAsync(cancellationToken);
+            return new AgentExecutionResult("archived during execution", ["criterion"], [], new Dictionary<string, string>(), null);
+        }
+    }
+
     private sealed class NullGitHubCatalog : IGitHubCatalog
     {
         public Task<IReadOnlyList<RepositoryRef>> ListRepositoriesAsync(CancellationToken cancellationToken)
@@ -515,18 +696,87 @@ public sealed class AgentTeamTests
             UpdatedAt = DateTimeOffset.UtcNow,
             Tools =
             [
+                new AgentToolDefinition { Name = "list_files", DisplayName = "List Files", Description = "List", Type = AgentToolType.ListFiles, Enabled = true },
+                new AgentToolDefinition { Name = "read_file", DisplayName = "Read File", Description = "Read", Type = AgentToolType.ReadFile, Enabled = true },
                 new AgentToolDefinition { Name = "write_file", DisplayName = "Write File", Description = "Write", Type = AgentToolType.WriteFile, Enabled = true, Destructive = true },
+                new AgentToolDefinition { Name = "search_code", DisplayName = "Search Code", Description = "Search", Type = AgentToolType.SearchCode, Enabled = true },
+                new AgentToolDefinition { Name = "run_terminal", DisplayName = "Run Terminal", Description = "Run", Type = AgentToolType.RunTerminal, Enabled = true, Destructive = true },
+                new AgentToolDefinition { Name = "git_status", DisplayName = "Git Status", Description = "Status", Type = AgentToolType.GitStatus, Enabled = true },
                 new AgentToolDefinition { Name = "git_diff", DisplayName = "Git Diff", Description = "Diff", Type = AgentToolType.GitDiff, Enabled = true }
             ],
             Policies =
             [
                 new AgentRolePolicy
                 {
+                    Role = AgentRole.Manager,
+                    ExecutionMode = AgentExecutionMode.StructuredPrompt,
+                    AllowedTools = [],
+                    AllowedDelegates = [AgentRole.Analyst, AgentRole.WebDev, AgentRole.Frontend, AgentRole.Backend, AgentRole.Tester, AgentRole.PM, AgentRole.Support],
+                    WritableRoots = [],
+                    MaxSteps = 2
+                },
+                new AgentRolePolicy
+                {
+                    Role = AgentRole.Analyst,
+                    ExecutionMode = AgentExecutionMode.StructuredPrompt,
+                    AllowedTools = ["list_files", "read_file", "search_code", "git_status"],
+                    AllowedDelegates = [AgentRole.WebDev, AgentRole.Frontend, AgentRole.Backend, AgentRole.Support],
+                    WritableRoots = [],
+                    MaxSteps = 4
+                },
+                new AgentRolePolicy
+                {
+                    Role = AgentRole.WebDev,
+                    ExecutionMode = AgentExecutionMode.StructuredPrompt,
+                    AllowedTools = ["list_files", "read_file", "search_code", "git_status", "git_diff"],
+                    AllowedDelegates = [AgentRole.Frontend, AgentRole.Backend, AgentRole.Tester],
+                    WritableRoots = [],
+                    MaxSteps = 4
+                },
+                new AgentRolePolicy
+                {
                     Role = AgentRole.Frontend,
                     ExecutionMode = AgentExecutionMode.ToolLoop,
-                    AllowedTools = ["write_file", "git_diff"],
+                    AllowedTools = ["list_files", "read_file", "write_file", "search_code", "run_terminal", "git_status", "git_diff"],
+                    AllowedDelegates = [AgentRole.Tester, AgentRole.PM],
                     WritableRoots = ["frontend", "src"],
                     MaxSteps = 4
+                },
+                new AgentRolePolicy
+                {
+                    Role = AgentRole.Backend,
+                    ExecutionMode = AgentExecutionMode.ToolLoop,
+                    AllowedTools = ["list_files", "read_file", "write_file", "search_code", "run_terminal", "git_status", "git_diff"],
+                    AllowedDelegates = [AgentRole.Tester, AgentRole.PM],
+                    WritableRoots = ["src", "tests"],
+                    MaxSteps = 4
+                },
+                new AgentRolePolicy
+                {
+                    Role = AgentRole.Tester,
+                    ExecutionMode = AgentExecutionMode.StructuredPrompt,
+                    AllowedTools = ["list_files", "read_file", "search_code", "run_terminal", "git_status", "git_diff"],
+                    AllowedDelegates = [AgentRole.PM],
+                    WritableRoots = [],
+                    MaxSteps = 5
+                },
+                new AgentRolePolicy
+                {
+                    Role = AgentRole.PM,
+                    ExecutionMode = AgentExecutionMode.StructuredPrompt,
+                    AllowedTools = ["read_file", "git_status", "git_diff"],
+                    AllowedDelegates = [AgentRole.Support],
+                    WritableRoots = [],
+                    MaxSteps = 3
+                },
+                new AgentRolePolicy
+                {
+                    Role = AgentRole.Support,
+                    ExecutionMode = AgentExecutionMode.StructuredPrompt,
+                    AllowedTools = ["read_file"],
+                    AllowedDelegates = [],
+                    WritableRoots = [],
+                    MaxSteps = 3
                 }
             ]
         };

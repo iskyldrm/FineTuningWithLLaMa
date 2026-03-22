@@ -1,14 +1,15 @@
-﻿import * as signalR from '@microsoft/signalr'
+import * as signalR from '@microsoft/signalr'
 import type {
   ActivityEvent,
   AgentRuntimeCatalog,
   ChatExchangeResult,
   ChatMessage,
   ChatThread,
-  CreateMissionRequest,
-  DashboardSnapshot,
+  CreateRunRequest,
   GitHubBoardSnapshot,
+  Mission,
   OllamaModelInfo,
+  OverviewSnapshot,
   PatchProposal,
   ProgressLog,
   RepositoryRef,
@@ -37,8 +38,44 @@ export function createRealtimeConnection(handlers: { onActivity: (event: Activit
   return connection
 }
 
-export function fetchDashboard() {
-  return requestJson<DashboardSnapshot>('/api/dashboard')
+export function fetchOverview() {
+  return requestJson<OverviewSnapshot>('/api/overview')
+}
+
+export function fetchRuns() {
+  return requestJson<Mission[]>('/api/runs')
+}
+
+export function fetchRun(runId: string) {
+  return requestJson<Mission>(`/api/runs/${runId}`)
+}
+
+export function fetchRunActivities(runId: string) {
+  return requestJson<ActivityEvent[]>(`/api/runs/${runId}/activities`)
+}
+
+export function fetchRunProgress(runId: string) {
+  return requestJson<ProgressLog[]>(`/api/runs/${runId}/progress`)
+}
+
+export function createRun(request: CreateRunRequest) {
+  return requestJson<Mission>('/api/runs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+}
+
+export function archiveRun(runId: string) {
+  return requestJson<Mission>(`/api/runs/${runId}/archive`, {
+    method: 'POST',
+  })
+}
+
+export function cancelRun(runId: string) {
+  return requestJson<Mission>(`/api/runs/${runId}/cancel`, {
+    method: 'POST',
+  })
 }
 
 export function fetchRepositories() {
@@ -49,24 +86,12 @@ export function fetchRepositoryBoard(owner: string, repo: string) {
   return requestJson<GitHubBoardSnapshot>(`/api/github/repositories/${owner}/${repo}/board`)
 }
 
-export function createMission(request: CreateMissionRequest) {
-  return requestJson('/api/missions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  })
-}
-
 export function decidePatch(proposalId: string, action: 'approve' | 'reject') {
   return requestJson<PatchProposal>(`/api/patches/${proposalId}/${action}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reviewNote: `${action} from dashboard` }),
+    body: JSON.stringify({ reviewNote: `${action} from swarms console` }),
   })
-}
-
-export function fetchProgress(missionId: string) {
-  return requestJson<ProgressLog[]>(`/api/missions/${missionId}/progress`)
 }
 
 export function fetchModels() {
@@ -96,6 +121,7 @@ export function saveAgentTool(tool: {
 export function saveAgentPolicy(role: string, policy: {
   executionMode: string
   allowedTools: string[]
+  allowedDelegates: string[]
   writableRoots: string[]
   maxSteps: number
 }) {

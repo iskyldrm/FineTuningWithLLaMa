@@ -1,58 +1,73 @@
-﻿import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import {
-  createMission,
+  archiveRun,
+  cancelRun,
   createRealtimeConnection,
+  createRun,
   createThread,
   decidePatch,
   fetchAgentRuntime,
-  fetchDashboard,
   fetchMessages,
   fetchModels,
-  fetchRepositoryBoard,
-  fetchProgress,
+  fetchOverview,
   fetchRepositories,
+  fetchRepositoryBoard,
+  fetchRun,
+  fetchRunActivities,
+  fetchRunProgress,
+  fetchRuns,
   fetchThreads,
   saveAgentPolicy,
   saveAgentTool,
   sendMessage,
 } from '../api'
 import type {
+  ActivityEvent,
   AgentRole,
   AgentRuntimeCatalog,
   AgentToolType,
   ChatMessage,
   ChatThread,
-  DashboardSnapshot,
+  CreateRunRequest,
   GitHubBoardItemRef,
   GitHubBoardSnapshot,
   Mission,
   OllamaModelInfo,
+  OverviewSnapshot,
   PatchProposal,
   ProgressLog,
   RepositoryRef,
   SprintRef,
+  SwarmTemplate,
 } from '../types'
-import { buildFallbackDashboard, preferredModel, repoKey } from './view-models'
+import { buildIdleMission, buildIdleOverview, preferredModel, repoKey } from './view-models'
 
 export type ApexConsoleState = ReturnType<typeof useApexConsole>
 
 export function useApexConsole() {
-  const fallback = useMemo(() => buildFallbackDashboard(), [])
-  const [dashboard, setDashboard] = useState<DashboardSnapshot>(fallback)
-  const [title, setTitle] = useState('Neural Workspace Build')
-  const [prompt, setPrompt] = useState('APEX knowledge base icin referans ekranlardaki estetikle yeni control room UI olustur.')
+  const fallback = useMemo(() => buildIdleOverview(), [])
+  const [overview, setOverview] = useState<OverviewSnapshot>(fallback)
+  const [runs, setRuns] = useState<Mission[]>([])
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [selectedRun, setSelectedRun] = useState<Mission | null>(null)
+  const [activities, setActivities] = useState<ActivityEvent[]>([])
+  const [progressLogs, setProgressLogs] = useState<ProgressLog[]>([])
+  const [title, setTitle] = useState('Stabilize swarm runtime and operator UI')
+  const [objective, setObjective] = useState('Recover the product into a compact operator console with direct task entry, live swarm detail, and reliable patch review.')
+  const [selectedSwarmTemplate, setSelectedSwarmTemplate] = useState<SwarmTemplate>('Hierarchical')
   const [busy, setBusy] = useState(false)
   const [chatBusy, setChatBusy] = useState(false)
+  const [runtimeBusy, setRuntimeBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
   const [repositories, setRepositories] = useState<RepositoryRef[]>([])
   const [selectedRepoKey, setSelectedRepoKey] = useState('')
-  const [repoStatus, setRepoStatus] = useState('GitHub repository listesi yukleniyor...')
+  const [repoStatus, setRepoStatus] = useState('Loading repositories...')
   const [board, setBoard] = useState<GitHubBoardSnapshot | null>(null)
   const [sprints, setSprints] = useState<SprintRef[]>([])
   const [selectedSprintId, setSelectedSprintId] = useState('')
   const [selectedWorkItemId, setSelectedWorkItemId] = useState('')
-  const [progressLogs, setProgressLogs] = useState<ProgressLog[]>(fallback.recentProgressLogs)
   const [models, setModels] = useState<OllamaModelInfo[]>([])
   const [selectedModel, setSelectedModel] = useState('')
   const [threads, setThreads] = useState<ChatThread[]>([])
@@ -60,11 +75,11 @@ export function useApexConsole() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [runtimeCatalog, setRuntimeCatalog] = useState<AgentRuntimeCatalog>({ updatedAt: new Date().toISOString(), tools: [], policies: [] })
-  const [runtimeBusy, setRuntimeBusy] = useState(false)
   const [selectedPolicyRole, setSelectedPolicyRole] = useState<AgentRole>('Frontend')
   const [policyDraft, setPolicyDraft] = useState({
     executionMode: 'ToolLoop' as 'StructuredPrompt' | 'ToolLoop',
     allowedTools: [] as string[],
+    allowedDelegates: [] as AgentRole[],
     writableRoots: 'frontend\nsrc',
     maxSteps: 8,
   })
@@ -78,25 +93,26 @@ export function useApexConsole() {
     commandTemplate: '',
   })
 
-  const deferredActivities = useDeferredValue(dashboard.recentActivities)
+  const deferredActivities = useDeferredValue(activities)
   const deferredProgress = useDeferredValue(progressLogs)
-  const mission = dashboard.activeMission ?? buildIdleMission(fallback)
+  const activeRun = overview.activeRun ?? buildIdleMission(overview)
+  const currentRun = selectedRun ?? (selectedRunId === activeRun.id ? activeRun : null) ?? activeRun
   const selectedRepository = useMemo(() => repositories.find((repo) => repoKey(repo) === selectedRepoKey) ?? null, [repositories, selectedRepoKey])
   const selectedSprint = useMemo(() => sprints.find((sprint) => sprint.id === selectedSprintId) ?? null, [selectedSprintId, sprints])
   const selectedWorkItem = useMemo(() => board?.items.find((item) => item.id === selectedWorkItemId) ?? null, [board?.items, selectedWorkItemId])
+  const selectedThread = useMemo(() => threads.find((thread) => thread.id === selectedThreadId) ?? null, [threads, selectedThreadId])
   const chatModels = useMemo(() => {
     const filtered = models.filter((model) => !/embed/i.test(model.name))
     return filtered.length > 0 ? filtered : models
   }, [models])
-  const selectedThread = useMemo(() => threads.find((thread) => thread.id === selectedThreadId) ?? null, [threads, selectedThreadId])
-  const changedFiles = useMemo(() => Array.from(new Set((mission.patchProposals ?? []).flatMap((proposal) => proposal.targetPaths))).slice(0, 8), [mission.patchProposals])
 
   useEffect(() => {
     let active = true
 
     async function boot() {
-      const [dashboardResult, repositoriesResult, modelsResult, threadsResult, runtimeResult] = await Promise.allSettled([
-        fetchDashboard(),
+      const [overviewResult, runsResult, repositoriesResult, modelsResult, threadsResult, runtimeResult] = await Promise.allSettled([
+        fetchOverview(),
+        fetchRuns(),
         fetchRepositories(),
         fetchModels(),
         fetchThreads(),
@@ -108,28 +124,25 @@ export function useApexConsole() {
       }
 
       startTransition(() => {
-        if (dashboardResult.status === 'fulfilled') {
-          setDashboard(dashboardResult.value)
-          setProgressLogs(dashboardResult.value.recentProgressLogs.length > 0 ? dashboardResult.value.recentProgressLogs : fallback.recentProgressLogs)
+        if (overviewResult.status === 'fulfilled') {
+          setOverview(overviewResult.value)
         } else {
-          setError(dashboardResult.reason instanceof Error ? dashboardResult.reason.message : 'Dashboard yukleme basarisiz oldu.')
+          setError(overviewResult.reason instanceof Error ? overviewResult.reason.message : 'Overview could not be loaded.')
+        }
+
+        if (runsResult.status === 'fulfilled') {
+          setRuns(runsResult.value)
         }
 
         if (repositoriesResult.status === 'fulfilled') {
           setRepositories(repositoriesResult.value)
-          setRepoStatus(
-            repositoriesResult.value.length > 0
-              ? `${repositoriesResult.value.length} repository hazir`
-              : 'Repository gelmedi. .env icine GITHUB_TOKEN, GITHUB_OWNER ve GITHUB_REPO ekle.'
-          )
-        } else {
-          setRepoStatus(repositoriesResult.reason instanceof Error ? repositoriesResult.reason.message : 'Repository lookup basarisiz oldu.')
+          setRepoStatus(repositoriesResult.value.length > 0 ? `${repositoriesResult.value.length} repositories available` : 'No repositories available.')
         }
 
         if (modelsResult.status === 'fulfilled') {
           setModels(modelsResult.value)
-          const modelFallback = dashboardResult.status === 'fulfilled' ? dashboardResult.value.chatModel : fallback.chatModel
-          setSelectedModel((current) => current || preferredModel(modelsResult.value, modelFallback))
+          const fallbackModel = overviewResult.status === 'fulfilled' ? overviewResult.value.system.chatModel : fallback.system.chatModel
+          setSelectedModel((current) => current || preferredModel(modelsResult.value, fallbackModel))
         }
 
         if (threadsResult.status === 'fulfilled') {
@@ -141,22 +154,35 @@ export function useApexConsole() {
           setRuntimeCatalog(runtimeResult.value)
         }
       })
+
+      const nextSelectedRunId =
+        (overviewResult.status === 'fulfilled' ? overviewResult.value.activeRun?.id ?? overviewResult.value.recentRuns[0]?.id : null)
+        ?? (runsResult.status === 'fulfilled' ? runsResult.value[0]?.id ?? null : null)
+
+      if (nextSelectedRunId) {
+        setSelectedRunId(nextSelectedRunId)
+      }
     }
 
     void boot()
 
     const connection = createRealtimeConnection({
       onActivity: (event) => {
+        if (event.missionId !== selectedRunId) {
+          return
+        }
+
         startTransition(() => {
-          setDashboard((current) => ({
-            ...current,
-            recentActivities: [...current.recentActivities.slice(-31), event],
-          }))
+          setActivities((current) => [event, ...current].slice(0, 80))
         })
       },
       onProgress: (event) => {
+        if (event.missionId !== selectedRunId) {
+          return
+        }
+
         startTransition(() => {
-          setProgressLogs((current) => [...current.slice(-79), event])
+          setProgressLogs((current) => [...current, event].slice(-120))
         })
       },
     })
@@ -164,7 +190,7 @@ export function useApexConsole() {
     void connection.start().then(() => setConnected(true)).catch(() => setConnected(false))
 
     const intervalId = window.setInterval(() => {
-      void refreshDashboard(active, fallback, setDashboard, setProgressLogs, setError)
+      void refreshOverview(setOverview, setRuns, setError)
     }, 6000)
 
     return () => {
@@ -172,32 +198,54 @@ export function useApexConsole() {
       window.clearInterval(intervalId)
       void connection.stop()
     }
-  }, [fallback])
+  }, [fallback.system.chatModel, selectedRunId])
 
   useEffect(() => {
-    const activeMission = dashboard.activeMission
-    if (!activeMission) {
+    const policy = runtimeCatalog.policies.find((item) => item.role === selectedPolicyRole)
+    if (!policy) {
       return
     }
 
-    if (activeMission.selectedRepository) {
-      setSelectedRepoKey(repoKey(activeMission.selectedRepository))
+    setPolicyDraft({
+      executionMode: policy.executionMode,
+      allowedTools: [...policy.allowedTools],
+      allowedDelegates: [...policy.allowedDelegates],
+      writableRoots: policy.writableRoots.join('\n'),
+      maxSteps: policy.maxSteps,
+    })
+  }, [runtimeCatalog, selectedPolicyRole])
+
+  useEffect(() => {
+    if (!selectedRunId) {
+      setSelectedRun(null)
+      setActivities([])
+      setProgressLogs([])
+      return
     }
 
-    if (activeMission.selectedSprint) {
-      setSelectedSprintId(activeMission.selectedSprint.id)
-    }
+    let active = true
+    void Promise.allSettled([fetchRun(selectedRunId), fetchRunActivities(selectedRunId), fetchRunProgress(selectedRunId)]).then(([runResult, activityResult, progressResult]) => {
+      if (!active) {
+        return
+      }
 
-    if (activeMission.selectedWorkItem) {
-      setSelectedWorkItemId(activeMission.selectedWorkItem.id)
-    }
+      if (runResult.status === 'fulfilled') {
+        setSelectedRun(runResult.value)
+      }
 
-    if (activeMission.id) {
-      void fetchProgress(activeMission.id)
-        .then((items) => setProgressLogs(items.length > 0 ? items : fallback.recentProgressLogs))
-        .catch(() => undefined)
+      if (activityResult.status === 'fulfilled') {
+        setActivities(activityResult.value)
+      }
+
+      if (progressResult.status === 'fulfilled') {
+        setProgressLogs(progressResult.value)
+      }
+    })
+
+    return () => {
+      active = false
     }
-  }, [dashboard.activeMission?.id, fallback.recentProgressLogs])
+  }, [selectedRunId])
 
   useEffect(() => {
     if (!selectedRepository) {
@@ -205,45 +253,33 @@ export function useApexConsole() {
       setSprints([])
       setSelectedSprintId('')
       setSelectedWorkItemId('')
-      setRepoStatus(repositories.length > 0 ? `${repositories.length} repository hazir` : 'GitHub repository listesi yukleniyor...')
       return
     }
 
-    const repository = selectedRepository
     let active = true
-
-    async function loadBoard() {
-      try {
-        const snapshot = await fetchRepositoryBoard(repository.owner, repository.name)
-
+    void fetchRepositoryBoard(selectedRepository.owner, selectedRepository.name)
+      .then((snapshot) => {
         if (!active) {
           return
         }
 
         setBoard(snapshot)
         setSprints(snapshot.sprints)
-        setSelectedSprintId((current) => (current && snapshot.sprints.some((item) => item.id === current) ? current : snapshot.sprints[0]?.id ?? ''))
-        setSelectedWorkItemId((current) => (current && snapshot.items.some((item) => item.id === current) ? current : ''))
-        setRepoStatus(snapshot.statusMessage || `${repository.fullName} board hazir`)
-      } catch (requestError) {
-        if (!active) {
-          return
+        setRepoStatus(snapshot.statusMessage || `${selectedRepository.fullName} ready`)
+        setSelectedSprintId((current) => current && snapshot.sprints.some((item) => item.id === current) ? current : snapshot.sprints[0]?.id ?? '')
+      })
+      .catch((requestError) => {
+        if (active) {
+          setRepoStatus(requestError instanceof Error ? requestError.message : 'Board data could not be loaded.')
+          setBoard(null)
+          setSprints([])
         }
-
-        setBoard(null)
-        setSprints([])
-        setSelectedSprintId('')
-        setSelectedWorkItemId('')
-        setRepoStatus(requestError instanceof Error ? requestError.message : 'Sprint lookup basarisiz oldu')
-      }
-    }
-
-    void loadBoard()
+      })
 
     return () => {
       active = false
     }
-  }, [selectedRepository, repositories.length])
+  }, [selectedRepository])
 
   useEffect(() => {
     if (!selectedThreadId) {
@@ -269,57 +305,26 @@ export function useApexConsole() {
     }
   }, [selectedThreadId])
 
-  useEffect(() => {
-    if (!board || !selectedSprintId) {
-      return
-    }
-
-    setSelectedWorkItemId((current) => {
-      if (current && board.items.some((item) => item.id === current && item.sprintId === selectedSprintId)) {
-        return current
-      }
-
-      return ''
-    })
-  }, [board, selectedSprintId])
-
-  useEffect(() => {
-    const policy = runtimeCatalog.policies.find((item) => item.role === selectedPolicyRole)
-    if (!policy) {
-      return
-    }
-
-    setPolicyDraft({
-      executionMode: policy.executionMode,
-      allowedTools: [...policy.allowedTools],
-      writableRoots: policy.writableRoots.join('\n'),
-      maxSteps: policy.maxSteps,
-    })
-  }, [runtimeCatalog, selectedPolicyRole])
-
-  async function handleCreateMission() {
+  async function handleCreateRun() {
     setBusy(true)
     setError(null)
     try {
-      const nextMission = (await createMission({
-        title,
-        prompt,
+      const request: CreateRunRequest = {
+        title: title.trim(),
+        objective: objective.trim(),
         selectedRepository,
         selectedSprint,
         selectedWorkItem,
+        swarmTemplate: selectedSwarmTemplate,
         autoCreatePullRequest: true,
-      })) as Mission
+      }
 
-      startTransition(() => {
-        setDashboard((current) => ({
-          ...current,
-          activeMission: nextMission,
-          agents: nextMission.agents,
-          pendingPatchProposals: nextMission.patchProposals.filter((proposal) => proposal.status === 'PendingReview'),
-        }))
-      })
+      const run = await createRun(request)
+      setSelectedRunId(run.id)
+      await refreshOverview(setOverview, setRuns, setError)
+      setSelectedRun(run)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Mission olusturma basarisiz oldu.')
+      setError(requestError instanceof Error ? requestError.message : 'Run could not be created.')
     } finally {
       setBusy(false)
     }
@@ -327,36 +332,75 @@ export function useApexConsole() {
 
   async function handleDispatchWorkItem(workItem: GitHubBoardItemRef) {
     const sprintForItem = sprints.find((item) => item.id === workItem.sprintId) ?? selectedSprint ?? null
-    const nextTitle = workItem.title
-    const nextPrompt = buildWorkItemPrompt(workItem, selectedRepository, sprintForItem)
-
     setSelectedWorkItemId(workItem.id)
     setSelectedSprintId(workItem.sprintId)
-    setTitle(nextTitle)
-    setPrompt(nextPrompt)
+    setTitle(workItem.title)
+    setObjective(buildWorkItemObjective(workItem, selectedRepository, sprintForItem))
+    await handleCreateRunWithDraft({
+      title: workItem.title,
+      objective: buildWorkItemObjective(workItem, selectedRepository, sprintForItem),
+      selectedRepository,
+      selectedSprint: sprintForItem,
+      selectedWorkItem: workItem,
+      swarmTemplate: selectedSwarmTemplate,
+      autoCreatePullRequest: true,
+    })
+  }
+
+  async function handleCreateRunWithDraft(request: CreateRunRequest) {
     setBusy(true)
     setError(null)
-
     try {
-      const nextMission = (await createMission({
-        title: nextTitle,
-        prompt: nextPrompt,
-        selectedRepository,
-        selectedSprint: sprintForItem,
-        selectedWorkItem: workItem,
-        autoCreatePullRequest: true,
-      })) as Mission
-
-      startTransition(() => {
-        setDashboard((current) => ({
-          ...current,
-          activeMission: nextMission,
-          agents: nextMission.agents,
-          pendingPatchProposals: nextMission.patchProposals.filter((proposal) => proposal.status === 'PendingReview'),
-        }))
-      })
+      const run = await createRun(request)
+      setSelectedRunId(run.id)
+      setSelectedRun(run)
+      await refreshOverview(setOverview, setRuns, setError)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Task dispatch basarisiz oldu.')
+      setError(requestError instanceof Error ? requestError.message : 'Run could not be created.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleSelectRun(runId: string) {
+    setSelectedRunId(runId)
+  }
+
+  async function handleArchiveRun(runId = currentRun.id) {
+    if (!runId || runId === 'idle-run') {
+      return
+    }
+
+    setBusy(true)
+    setError(null)
+    try {
+      await archiveRun(runId)
+      if (selectedRunId === runId) {
+        setSelectedRunId(null)
+        setSelectedRun(null)
+      }
+
+      await refreshOverview(setOverview, setRuns, setError)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Run could not be archived.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleCancelRun(runId = currentRun.id) {
+    if (!runId || runId === 'idle-run') {
+      return
+    }
+
+    setBusy(true)
+    setError(null)
+    try {
+      const run = await cancelRun(runId)
+      setSelectedRun(run)
+      await refreshOverview(setOverview, setRuns, setError)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Run could not be cancelled.')
     } finally {
       setBusy(false)
     }
@@ -365,20 +409,31 @@ export function useApexConsole() {
   async function handlePatchDecision(proposal: PatchProposal, action: 'approve' | 'reject') {
     try {
       await decidePatch(proposal.id, action)
-      await refreshDashboard(true, fallback, setDashboard, setProgressLogs, setError)
+      if (selectedRunId) {
+        const [run, runActivities, runProgress] = await Promise.all([
+          fetchRun(selectedRunId),
+          fetchRunActivities(selectedRunId),
+          fetchRunProgress(selectedRunId),
+        ])
+        setSelectedRun(run)
+        setActivities(runActivities)
+        setProgressLogs(runProgress)
+      }
+
+      await refreshOverview(setOverview, setRuns, setError)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Patch karari gonderilemedi.')
+      setError(requestError instanceof Error ? requestError.message : 'Patch decision could not be saved.')
     }
   }
 
   async function handleNewThread() {
     try {
-      const thread = await createThread(selectedModel || dashboard.chatModel)
+      const thread = await createThread(selectedModel || overview.system.chatModel)
       setThreads((current) => [thread, ...current.filter((item) => item.id !== thread.id)])
       setSelectedThreadId(thread.id)
       setMessages([])
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Yeni thread olusturulamadi.')
+      setError(requestError instanceof Error ? requestError.message : 'Chat thread could not be created.')
     }
   }
 
@@ -393,18 +448,18 @@ export function useApexConsole() {
     try {
       let threadId = selectedThreadId
       if (!threadId) {
-        const thread = await createThread(selectedModel || dashboard.chatModel)
+        const thread = await createThread(selectedModel || overview.system.chatModel)
         threadId = thread.id
         setThreads((current) => [thread, ...current.filter((item) => item.id !== thread.id)])
         setSelectedThreadId(thread.id)
       }
 
-      const result = await sendMessage(threadId, content, selectedModel || dashboard.chatModel)
+      const result = await sendMessage(threadId, content, selectedModel || overview.system.chatModel)
       setChatInput('')
       setThreads((current) => [result.thread, ...current.filter((item) => item.id !== result.thread.id)])
       setMessages((current) => [...current, result.userMessage, result.assistantMessage])
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Mesaj gonderilemedi.')
+      setError(requestError instanceof Error ? requestError.message : 'Message could not be sent.')
     } finally {
       setChatBusy(false)
     }
@@ -417,12 +472,12 @@ export function useApexConsole() {
 
   async function handleSaveTool() {
     if (!toolForm.name.trim()) {
-      setError('Tool adi zorunlu.')
+      setError('Tool name is required.')
       return
     }
 
     if (toolForm.type === 'CustomCommand' && !toolForm.commandTemplate.trim()) {
-      setError('CustomCommand tool icin command template gerekli.')
+      setError('Custom command tools require a command template.')
       return
     }
 
@@ -447,7 +502,7 @@ export function useApexConsole() {
         commandTemplate: '',
       })
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Tool kaydedilemedi.')
+      setError(requestError instanceof Error ? requestError.message : 'Tool could not be saved.')
     } finally {
       setRuntimeBusy(false)
     }
@@ -460,6 +515,7 @@ export function useApexConsole() {
       await saveAgentPolicy(selectedPolicyRole, {
         executionMode: policyDraft.executionMode,
         allowedTools: policyDraft.allowedTools,
+        allowedDelegates: policyDraft.allowedDelegates,
         writableRoots: policyDraft.writableRoots
           .split(/\r?\n|,/)
           .map((item) => item.trim())
@@ -468,7 +524,7 @@ export function useApexConsole() {
       })
       await refreshRuntimeCatalog()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Role policy kaydedilemedi.')
+      setError(requestError instanceof Error ? requestError.message : 'Policy could not be saved.')
     } finally {
       setRuntimeBusy(false)
     }
@@ -483,126 +539,111 @@ export function useApexConsole() {
     }))
   }
 
+  function togglePolicyDelegate(role: AgentRole) {
+    setPolicyDraft((current) => ({
+      ...current,
+      allowedDelegates: current.allowedDelegates.includes(role)
+        ? current.allowedDelegates.filter((item) => item !== role)
+        : [...current.allowedDelegates, role].sort(),
+    }))
+  }
+
   return {
+    activities,
     board,
     busy,
-    changedFiles,
     chatBusy,
     chatInput,
     chatModels,
     connected,
-    dashboard,
+    currentRun,
     deferredActivities,
     deferredProgress,
     error,
-    fallback,
     messages,
-    mission,
     models,
+    objective,
+    overview,
     progressLogs,
-    prompt,
     repoStatus,
     repositories,
+    runs,
+    runtimeBusy,
+    runtimeCatalog,
     selectedModel,
+    selectedPolicyRole,
     selectedRepoKey,
     selectedRepository,
+    selectedRun,
+    selectedRunId,
     selectedSprint,
     selectedSprintId,
-    selectedWorkItem,
-    selectedWorkItemId,
+    selectedSwarmTemplate,
     selectedThread,
     selectedThreadId,
-    selectedPolicyRole,
+    selectedWorkItem,
+    selectedWorkItemId,
+    policyDraft,
     sprints,
     threads,
     title,
-    runtimeBusy,
-    runtimeCatalog,
-    policyDraft,
     toolForm,
     setChatInput,
+    setObjective,
     setPolicyDraft,
-    setPrompt,
-    setSelectedPolicyRole,
     setSelectedModel,
+    setSelectedPolicyRole,
     setSelectedRepoKey,
+    setSelectedRunId,
     setSelectedSprintId,
-    setSelectedWorkItemId,
+    setSelectedSwarmTemplate,
     setSelectedThreadId,
-    setToolForm,
+    setSelectedWorkItemId,
     setTitle,
-    handleCreateMission,
+    setToolForm,
+    handleArchiveRun,
+    handleCancelRun,
+    handleCreateRun,
     handleDispatchWorkItem,
     handleNewThread,
     handlePatchDecision,
     handleSavePolicy,
     handleSaveTool,
+    handleSelectRun,
     handleSendMessage,
+    togglePolicyDelegate,
     togglePolicyTool,
   }
 }
 
-async function refreshDashboard(
-  active: boolean,
-  fallback: DashboardSnapshot,
-  setDashboard: React.Dispatch<React.SetStateAction<DashboardSnapshot>>,
-  setProgressLogs: React.Dispatch<React.SetStateAction<ProgressLog[]>>,
-  setError: React.Dispatch<React.SetStateAction<string | null>>,
+async function refreshOverview(
+  setOverview: Dispatch<SetStateAction<OverviewSnapshot>>,
+  setRuns: Dispatch<SetStateAction<Mission[]>>,
+  setError: Dispatch<SetStateAction<string | null>>,
 ) {
   try {
-    const snapshot = await fetchDashboard()
-    if (!active) {
-      return
-    }
-
+    const [overviewResult, runsResult] = await Promise.all([fetchOverview(), fetchRuns()])
     startTransition(() => {
-      setDashboard((current) => ({ ...current, ...snapshot }))
-      setProgressLogs(snapshot.recentProgressLogs.length > 0 ? snapshot.recentProgressLogs : fallback.recentProgressLogs)
+      setOverview(overviewResult)
+      setRuns(runsResult)
     })
   } catch (requestError) {
-    if (active) {
-      setError(requestError instanceof Error ? requestError.message : 'Dashboard yukleme basarisiz oldu.')
-    }
+    setError(requestError instanceof Error ? requestError.message : 'Overview could not be refreshed.')
   }
 }
 
-function buildWorkItemPrompt(workItem: GitHubBoardItemRef, repository: RepositoryRef | null, sprint: SprintRef | null) {
+function buildWorkItemObjective(workItem: GitHubBoardItemRef, repository: RepositoryRef | null, sprint: SprintRef | null) {
   const subtasks = workItem.subtasks.length > 0
     ? workItem.subtasks.map((item) => `- ${item}`).join('\n')
-    : '- Gorevi issue aciklamasina gore tamamla.'
+    : '- Deliver the issue using the repository context.'
 
   return [
-    `GitHub board gorevini secili repository icinde tamamla: ${workItem.title}.`,
-    repository ? `Repository: ${repository.fullName}.` : 'Repository secimi eksik.',
-    sprint ? `Sprint: ${sprint.title}.` : 'Sprint secimi yok.',
+    `Complete the selected board item: ${workItem.title}.`,
+    repository ? `Repository: ${repository.fullName}.` : 'Repository not selected.',
+    sprint ? `Sprint: ${sprint.title}.` : 'Sprint not selected.',
     `Status lane: ${workItem.status}.`,
-    workItem.description ? `Aciklama:\n${workItem.description}` : 'Aciklama yok.',
+    workItem.description ? `Description:\n${workItem.description}` : 'No additional description.',
     `Checklist:\n${subtasks}`,
-    'Gerekli degisiklikleri repo klasorlerinde yap, patchleri hazirla, dogrulamayi calistir ve uygunsa PR olustur.',
+    'Keep the work direct, patch-focused, and reviewable.',
   ].join('\n\n')
 }
-
-function buildIdleMission(fallback: DashboardSnapshot): Mission {
-  const now = new Date().toISOString()
-  return {
-    id: 'idle-mission',
-    title: 'Task secimi bekleniyor',
-    prompt: '',
-    status: 'Draft',
-    createdAt: now,
-    updatedAt: now,
-    currentPhase: 'Idle',
-    selectedRepository: null,
-    selectedSprint: null,
-    selectedWorkItem: null,
-    externalTask: null,
-    pullRequest: null,
-    autoCreatePullRequest: true,
-    workspaceRootPath: null,
-    steps: [],
-    patchProposals: [],
-    agents: fallback.agents,
-    artifacts: {},
-  }
-}
-

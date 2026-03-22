@@ -34,7 +34,8 @@ public enum MissionStatus
     Running,
     AwaitingPatchApproval,
     Completed,
-    Failed
+    Failed,
+    Cancelled
 }
 
 public enum MissionStepStatus
@@ -58,6 +59,13 @@ public enum AgentExecutionMode
 {
     StructuredPrompt,
     ToolLoop
+}
+
+public enum SwarmTemplate
+{
+    Sequential,
+    Hierarchical,
+    ParallelReview
 }
 
 public enum AgentToolType
@@ -96,10 +104,16 @@ public sealed class Mission
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Title { get; set; } = string.Empty;
     public string Prompt { get; set; } = string.Empty;
+    public string Objective { get; set; } = string.Empty;
+    public SwarmTemplate SwarmTemplate { get; set; } = SwarmTemplate.Hierarchical;
     public MissionStatus Status { get; set; } = MissionStatus.Draft;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public string? CurrentPhase { get; set; }
+    public bool IsArchived { get; set; }
+    public DateTimeOffset? ArchivedAt { get; set; }
+    public DateTimeOffset? CancelledAt { get; set; }
+    public string? CancelledReason { get; set; }
     public RepositoryRef? SelectedRepository { get; set; }
     public SprintRef? SelectedSprint { get; set; }
     public GitHubBoardItemRef? SelectedWorkItem { get; set; }
@@ -300,6 +314,7 @@ public sealed class AgentRolePolicy
     public AgentRole Role { get; set; }
     public AgentExecutionMode ExecutionMode { get; set; } = AgentExecutionMode.StructuredPrompt;
     public List<string> AllowedTools { get; set; } = [];
+    public List<AgentRole> AllowedDelegates { get; set; } = [];
     public List<string> WritableRoots { get; set; } = [];
     public int MaxSteps { get; set; } = 6;
 }
@@ -365,6 +380,32 @@ public sealed class DashboardSnapshot
     public int PhysicalWorkerCount { get; set; }
 }
 
+public sealed class OverviewSystemSnapshot
+{
+    public int LogicalQueueDepth { get; set; }
+    public string ChatModel { get; set; } = string.Empty;
+    public int PhysicalWorkerCount { get; set; }
+}
+
+public sealed class OverviewSnapshot
+{
+    public Mission? ActiveRun { get; set; }
+    public List<Mission> RecentRuns { get; set; } = [];
+    public OverviewSystemSnapshot System { get; set; } = new();
+    public List<AgentSnapshot> Agents { get; set; } = [];
+}
+
+public sealed class CreateRunRequest
+{
+    public string Title { get; set; } = string.Empty;
+    public string Objective { get; set; } = string.Empty;
+    public RepositoryRef? SelectedRepository { get; set; }
+    public SprintRef? SelectedSprint { get; set; }
+    public GitHubBoardItemRef? SelectedWorkItem { get; set; }
+    public SwarmTemplate SwarmTemplate { get; set; } = SwarmTemplate.Hierarchical;
+    public bool AutoCreatePullRequest { get; set; } = true;
+}
+
 public sealed class CreateMissionRequest
 {
     public string Title { get; set; } = string.Empty;
@@ -407,6 +448,7 @@ public sealed class UpdateAgentRolePolicyRequest
 {
     public AgentExecutionMode ExecutionMode { get; set; } = AgentExecutionMode.StructuredPrompt;
     public List<string> AllowedTools { get; set; } = [];
+    public List<AgentRole> AllowedDelegates { get; set; } = [];
     public List<string> WritableRoots { get; set; } = [];
     public int MaxSteps { get; set; } = 6;
 }

@@ -99,6 +99,11 @@ public sealed class JsonAgentRuntimeCatalogStore : IAgentRuntimeCatalogStore
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            policy.AllowedDelegates = request.AllowedDelegates
+                .Where(candidate => candidate != role)
+                .Distinct()
+                .OrderBy(candidate => candidate.ToString(), StringComparer.OrdinalIgnoreCase)
+                .ToList();
             policy.WritableRoots = request.WritableRoots
                 .Select(NormalizePathPrefix)
                 .Where(item => !string.IsNullOrWhiteSpace(item))
@@ -172,14 +177,14 @@ public sealed class JsonAgentRuntimeCatalogStore : IAgentRuntimeCatalogStore
             ],
             Policies =
             [
-                new AgentRolePolicy { Role = AgentRole.Manager, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = [], WritableRoots = [], MaxSteps = 2 },
-                new AgentRolePolicy { Role = AgentRole.Analyst, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = ["list_files", "read_file", "search_code", "git_status"], WritableRoots = [], MaxSteps = 4 },
-                new AgentRolePolicy { Role = AgentRole.WebDev, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = ["list_files", "read_file", "search_code", "git_status", "git_diff"], WritableRoots = [], MaxSteps = 4 },
-                new AgentRolePolicy { Role = AgentRole.Frontend, ExecutionMode = AgentExecutionMode.ToolLoop, AllowedTools = ["list_files", "read_file", "write_file", "search_code", "run_terminal", "git_status", "git_diff"], WritableRoots = ["frontend", "src"], MaxSteps = 8 },
-                new AgentRolePolicy { Role = AgentRole.Backend, ExecutionMode = AgentExecutionMode.ToolLoop, AllowedTools = ["list_files", "read_file", "write_file", "search_code", "run_terminal", "git_status", "git_diff"], WritableRoots = ["src", "tests"], MaxSteps = 8 },
-                new AgentRolePolicy { Role = AgentRole.Tester, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = ["list_files", "read_file", "search_code", "run_terminal", "git_status", "git_diff"], WritableRoots = [], MaxSteps = 5 },
-                new AgentRolePolicy { Role = AgentRole.PM, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = ["read_file", "git_status", "git_diff"], WritableRoots = [], MaxSteps = 3 },
-                new AgentRolePolicy { Role = AgentRole.Support, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = ["read_file"], WritableRoots = [], MaxSteps = 3 }
+                new AgentRolePolicy { Role = AgentRole.Manager, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = [], AllowedDelegates = [AgentRole.Analyst, AgentRole.WebDev, AgentRole.Frontend, AgentRole.Backend, AgentRole.Tester, AgentRole.PM, AgentRole.Support], WritableRoots = [], MaxSteps = 2 },
+                new AgentRolePolicy { Role = AgentRole.Analyst, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = ["list_files", "read_file", "search_code", "git_status"], AllowedDelegates = [AgentRole.WebDev, AgentRole.Frontend, AgentRole.Backend, AgentRole.Support], WritableRoots = [], MaxSteps = 4 },
+                new AgentRolePolicy { Role = AgentRole.WebDev, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = ["list_files", "read_file", "search_code", "git_status", "git_diff"], AllowedDelegates = [AgentRole.Frontend, AgentRole.Backend, AgentRole.Tester], WritableRoots = [], MaxSteps = 4 },
+                new AgentRolePolicy { Role = AgentRole.Frontend, ExecutionMode = AgentExecutionMode.ToolLoop, AllowedTools = ["list_files", "read_file", "write_file", "search_code", "run_terminal", "git_status", "git_diff"], AllowedDelegates = [AgentRole.Tester, AgentRole.PM], WritableRoots = ["frontend", "src"], MaxSteps = 8 },
+                new AgentRolePolicy { Role = AgentRole.Backend, ExecutionMode = AgentExecutionMode.ToolLoop, AllowedTools = ["list_files", "read_file", "write_file", "search_code", "run_terminal", "git_status", "git_diff"], AllowedDelegates = [AgentRole.Tester, AgentRole.PM], WritableRoots = ["src", "tests"], MaxSteps = 8 },
+                new AgentRolePolicy { Role = AgentRole.Tester, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = ["list_files", "read_file", "search_code", "run_terminal", "git_status", "git_diff"], AllowedDelegates = [AgentRole.PM], WritableRoots = [], MaxSteps = 5 },
+                new AgentRolePolicy { Role = AgentRole.PM, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = ["read_file", "git_status", "git_diff"], AllowedDelegates = [AgentRole.Support], WritableRoots = [], MaxSteps = 3 },
+                new AgentRolePolicy { Role = AgentRole.Support, ExecutionMode = AgentExecutionMode.StructuredPrompt, AllowedTools = ["read_file"], AllowedDelegates = [], WritableRoots = [], MaxSteps = 3 }
             ]
         };
     }
@@ -214,6 +219,11 @@ public sealed class JsonAgentRuntimeCatalogStore : IAgentRuntimeCatalogStore
                 .Where(item => catalog.Tools.Any(tool => string.Equals(tool.Name, item, StringComparison.OrdinalIgnoreCase)))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            policy.AllowedDelegates = policy.AllowedDelegates
+                .Where(candidate => candidate != policy.Role)
+                .Distinct()
+                .OrderBy(candidate => candidate.ToString(), StringComparer.OrdinalIgnoreCase)
                 .ToList();
             policy.WritableRoots = policy.WritableRoots
                 .Select(NormalizePathPrefix)
@@ -255,6 +265,7 @@ public sealed class JsonAgentRuntimeCatalogStore : IAgentRuntimeCatalogStore
             Role = source.Role,
             ExecutionMode = source.ExecutionMode,
             AllowedTools = source.AllowedTools.ToList(),
+            AllowedDelegates = source.AllowedDelegates.ToList(),
             WritableRoots = source.WritableRoots.ToList(),
             MaxSteps = source.MaxSteps
         };
@@ -488,11 +499,11 @@ internal sealed class ToolLoopAgentExecutor
         {
             var result = tool.Type switch
             {
-                AgentToolType.ListFiles => await _workspaceToolset.ListFilesAsync(context.Mission, GetValue(action.Arguments, "pattern"), GetInt(action.Arguments, "limit", 80), cancellationToken),
-                AgentToolType.ReadFile => await _workspaceToolset.ReadFileAsync(context.Mission, GetRequiredPath(action.Arguments), GetInt(action.Arguments, "startLine", 1), GetInt(action.Arguments, "maxLines", 220), cancellationToken),
+                AgentToolType.ListFiles => await _workspaceToolset.ListFilesAsync(context.Mission, GetPattern(action.Arguments), GetInt(action.Arguments, "limit", 80), cancellationToken),
+                AgentToolType.ReadFile => await _workspaceToolset.ReadFileAsync(context.Mission, GetRequiredPath(action.Arguments), GetStartLine(action.Arguments), GetMaxLines(action.Arguments), cancellationToken),
                 AgentToolType.WriteFile => await ExecuteWriteFileAsync(context, policy, action, cancellationToken),
-                AgentToolType.SearchCode => await _workspaceToolset.SearchCodeAsync(context.Mission, GetValue(action.Arguments, "query") ?? string.Empty, GetInt(action.Arguments, "limit", 20), cancellationToken),
-                AgentToolType.RunTerminal => await _workspaceToolset.RunTerminalCommandAsync(context.Mission, GetValue(action.Arguments, "command") ?? string.Empty, cancellationToken),
+                AgentToolType.SearchCode => await _workspaceToolset.SearchCodeAsync(context.Mission, GetRequiredValue(action.Arguments, "query", "SearchCode requires a non-empty 'query' argument."), GetInt(action.Arguments, "limit", 20), cancellationToken),
+                AgentToolType.RunTerminal => await _workspaceToolset.RunTerminalCommandAsync(context.Mission, GetRequiredValue(action.Arguments, "command", "RunTerminal requires a non-empty 'command' argument."), cancellationToken),
                 AgentToolType.GitStatus => await _workspaceToolset.GetGitStatusAsync(context.Mission, cancellationToken),
                 AgentToolType.GitDiff => await _workspaceToolset.GetGitDiffAsync(context.Mission, cancellationToken),
                 AgentToolType.GitCommit => await _workspaceToolset.CommitAsync(context.Mission, GetValue(action.Arguments, "message") ?? $"Apex AI: {Role}", cancellationToken),
@@ -541,10 +552,10 @@ internal sealed class ToolLoopAgentExecutor
         var path = GetRequiredPath(action.Arguments);
         if (!IsWritablePath(policy, path))
         {
-            return $"Blocked: '{path}' is outside writable roots for {Role}.";
+            return $"Blocked: '{path}' is outside writable roots for {Role}. Allowed roots: {string.Join(", ", policy.WritableRoots)}";
         }
 
-        var content = GetValue(action.Arguments, "content") ?? string.Empty;
+        var content = GetRequiredValue(action.Arguments, "content", "WriteFile requires a non-empty 'content' argument.");
         return await _workspaceToolset.WriteFileAsync(context.Mission, path, content, cancellationToken);
     }
 
@@ -552,7 +563,11 @@ internal sealed class ToolLoopAgentExecutor
     {
         var toolLines = tools
             .Where(item => item.Enabled && policy.AllowedTools.Contains(item.Name, StringComparer.OrdinalIgnoreCase))
-            .Select(item => $"- {item.Name}: {item.Description} (type: {item.Type})")
+            .Select(item =>
+            {
+                var contract = GetToolContract(item.Type);
+                return $"- {item.Name}: {item.Description} (type: {item.Type}){Environment.NewLine}  args: {contract.ArgumentSummary}{Environment.NewLine}  example: {contract.ExampleJson}";
+            })
             .ToList();
 
         var writableRoots = policy.WritableRoots.Count == 0 ? "Read-only by policy." : string.Join(", ", policy.WritableRoots);
@@ -577,6 +592,8 @@ Rules:
 - Writable roots: {writableRoots}
 - When the task is complete, return {{""kind"":""finish"",""summary"":""...""}}.
 - If a tool is blocked, adapt and choose another tool.
+- Use the exact argument names shown in the contracts below.
+- Accepted aliases are normalized server-side, but the preferred names are still the contract names.
 
 Allowed tools:
 {string.Join(Environment.NewLine, toolLines)}";
@@ -594,8 +611,8 @@ Allowed tools:
 
         return $"""
             Mission title: {context.Mission.Title}
-            Mission prompt:
-            {context.Mission.Prompt}
+            Mission objective:
+            {GetMissionObjective(context.Mission)}
 
             Repository:
             {context.Mission.SelectedRepository?.FullName ?? "Not selected"}
@@ -692,7 +709,8 @@ Allowed tools:
                 return null;
             }
 
-            return new ToolLoopAction("tool", NormalizeToolName(toolName), arguments, summary);
+            var normalizedToolName = NormalizeToolName(toolName);
+            return new ToolLoopAction("tool", normalizedToolName, NormalizeArguments(normalizedToolName, arguments), summary);
         }
         catch
         {
@@ -745,6 +763,17 @@ Allowed tools:
         return arguments.TryGetValue(key, out var value) ? value : null;
     }
 
+    private static string GetRequiredValue(IReadOnlyDictionary<string, string> arguments, string key, string errorMessage)
+    {
+        var value = GetValue(arguments, key)?.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException(errorMessage);
+        }
+
+        return value;
+    }
+
     private static int GetInt(IReadOnlyDictionary<string, string> arguments, string key, int fallback)
     {
         return arguments.TryGetValue(key, out var value) && int.TryParse(value, out var parsed) ? parsed : fallback;
@@ -752,7 +781,35 @@ Allowed tools:
 
     private static string GetRequiredPath(IReadOnlyDictionary<string, string> arguments)
     {
-        return arguments.TryGetValue("path", out var path) ? path : string.Empty;
+        var path = GetValue(arguments, "path")?.Trim();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new InvalidOperationException("A file path is required. Use 'path' with a workspace-relative file path such as 'frontend/src/App.tsx'.");
+        }
+
+        return path;
+    }
+
+    private static string? GetPattern(IReadOnlyDictionary<string, string> arguments)
+    {
+        return GetValue(arguments, "pattern")?.Trim();
+    }
+
+    private static int GetStartLine(IReadOnlyDictionary<string, string> arguments)
+    {
+        return Math.Max(1, GetInt(arguments, "startLine", 1));
+    }
+
+    private static int GetMaxLines(IReadOnlyDictionary<string, string> arguments)
+    {
+        var startLine = GetStartLine(arguments);
+        var maxLines = GetInt(arguments, "maxLines", 220);
+        if (arguments.TryGetValue("lineEnd", out var lineEndRaw) && int.TryParse(lineEndRaw, out var lineEnd))
+        {
+            maxLines = Math.Max(1, lineEnd - startLine + 1);
+        }
+
+        return Math.Max(1, maxLines);
     }
 
     private static bool IsWritablePath(AgentRolePolicy policy, string path)
@@ -830,5 +887,51 @@ Allowed tools:
         return value.Length > limit ? value[..limit] : value;
     }
 
+    private static Dictionary<string, string> NormalizeArguments(string toolName, IReadOnlyDictionary<string, string> rawArguments)
+    {
+        var normalized = new Dictionary<string, string>(rawArguments, StringComparer.OrdinalIgnoreCase);
+        CopyAlias(normalized, "file", "path");
+        CopyAlias(normalized, "relativePath", "path");
+        CopyAlias(normalized, "lineStart", "startLine");
+        CopyAlias(normalized, "directory", "pattern");
+
+        if (string.Equals(toolName, "search_code", StringComparison.OrdinalIgnoreCase) && normalized.TryGetValue("directory", out var searchDirectory))
+        {
+            normalized["pattern"] = searchDirectory;
+        }
+
+        return normalized;
+    }
+
+    private static void CopyAlias(IDictionary<string, string> arguments, string alias, string canonical)
+    {
+        if (!arguments.ContainsKey(canonical) && arguments.TryGetValue(alias, out var aliasValue) && !string.IsNullOrWhiteSpace(aliasValue))
+        {
+            arguments[canonical] = aliasValue;
+        }
+    }
+
+    private static string GetMissionObjective(Mission mission)
+    {
+        return string.IsNullOrWhiteSpace(mission.Objective) ? mission.Prompt : mission.Objective;
+    }
+
+    private static ToolContract GetToolContract(AgentToolType type)
+    {
+        return type switch
+        {
+            AgentToolType.ListFiles => new ToolContract("pattern?: optional folder or glob hint, limit?: optional integer", "{\"kind\":\"tool\",\"toolName\":\"list_files\",\"arguments\":{\"pattern\":\"frontend/src\",\"limit\":60}}"),
+            AgentToolType.ReadFile => new ToolContract("path: required, startLine?: integer, maxLines?: integer", "{\"kind\":\"tool\",\"toolName\":\"read_file\",\"arguments\":{\"path\":\"frontend/src/App.tsx\",\"startLine\":1,\"maxLines\":160}}"),
+            AgentToolType.WriteFile => new ToolContract("path: required, content: required", "{\"kind\":\"tool\",\"toolName\":\"write_file\",\"arguments\":{\"path\":\"frontend/src/App.tsx\",\"content\":\"export default function App() { return <main /> }\"}}"),
+            AgentToolType.SearchCode => new ToolContract("query: required, limit?: optional integer", "{\"kind\":\"tool\",\"toolName\":\"search_code\",\"arguments\":{\"query\":\"createRun\",\"limit\":20}}"),
+            AgentToolType.RunTerminal => new ToolContract("command: required", "{\"kind\":\"tool\",\"toolName\":\"run_terminal\",\"arguments\":{\"command\":\"npm run build\"}}"),
+            AgentToolType.GitCommit => new ToolContract("message?: optional commit message", "{\"kind\":\"tool\",\"toolName\":\"git_commit\",\"arguments\":{\"message\":\"Apex AI: update run shell\"}}"),
+            AgentToolType.GitPush => new ToolContract("branchName?: optional branch name", "{\"kind\":\"tool\",\"toolName\":\"git_push\",\"arguments\":{\"branchName\":\"apex/ui-refresh\"}}"),
+            _ => new ToolContract("No arguments required.", "{\"kind\":\"tool\",\"toolName\":\"git_status\",\"arguments\":{}}")
+        };
+    }
+
     private sealed record ToolLoopAction(string Kind, string? ToolName, IReadOnlyDictionary<string, string> Arguments, string? Summary);
+
+    private sealed record ToolContract(string ArgumentSummary, string ExampleJson);
 }
